@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 3: Tested NEW payslip-edit dialog + inline email fill + Excel email auto-detection features. All 6 dedicated pytest cases PASS and full frontend Playwright flow PASSES. Herliana logs in, unlocks Gaji (PIN 5678), opens Slip Gaji tab where the old 'Upload file Excel dari konsultan' banner is gone — replaced by a shorter hint mentioning the pencil/edit icon. Clicking hrd-slip-edit-<id> opens hrd-slip-dialog with hrd-slip-f-nik/-nama/-jabatan/-email/-takehome. Editing the email to test1@mks.co.id + Simpan issues PUT /api/hrd/payslips/{id} (200) and refreshes the list. On the Kirim Email tab each row now has hrd-email-input-<id> as an editable input; typing a value reveals hrd-email-save-<id>, clicking saves it (toast 'Email disimpan') and the save button disappears. Backend: PUT preserves+recomputes gross/net/take_home; POST /payslips/import-excel with an email placed in C11 of the 'wawan' sheet ends up as payslip.email == 'wawan@mks.co.id'; re-importing over an existing slip whose email was set manually (harjono -> manual.harjono@mks.co.id) with no email in the sheet keeps the manual email intact. Regression: month=8 year=2026 import creates 5 slips (wawan take_home=8,138,000), GET /payslips/{id}/pdf returns application/pdf, GET /payslips returns 403 for heri and susanto.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_new_payslip_edit_and_email.py",
+    "/app/test_reports/pytest/iter3_new.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PayslipIn currently doesn't declare `terbilang`; the frontend's slipToPayload passes it. Since Pydantic v2 default ignores unknown, no error, but adding `terbilang: str = ''` to PayslipIn (and persisting through _compute_slip) would preserve the sheet-parsed terbilang across a manual edit-save. Right now editing a slip may drop the terbilang field on disk.",
+    "_parse_slip_sheet scans only cols 1..11 rows 6..40 for email. Fine for the current template but consider expanding row range or matching against actual max_row.",
+    "update_payslip returns find_one after $set — good; excludes _id. create_payslip also correctly pops _id.",
+    "Frontend inline email save uses slipToPayload which passes take_home as-is; backend _compute_slip will accept it since it's not None. OK.",
+    "Two React warnings about missing Description/aria-describedby on DialogContent (Radix) — a11y minor."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_new_payslip_edit_and_email.py (new file)"
+  ],
+  "success_rate": {"backend": "100% (6/6 new + prior 23/23 still valid)", "frontend": "100% of new flows"},
+  "test_credentials": "herliana/123456 (Gaji PIN 5678), susanto/Subbalo1994, heri/123456",
+  "seed_data_creation": "Imported slips for month=8/2026 and month=9/2026 (with wawan email auto-detected). After tests: Wawan(8/2026).email=test1@mks.co.id (from PUT test); Harjono(9/2026).email=manual.harjono@mks.co.id; Wawan(9/2026).email=wawan@mks.co.id; and Harjono(8/2026).email=regression.change@mks.co.id set via UI inline edit.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run new tests with `pytest -n 0 backend/tests/test_new_payslip_edit_and_email.py`. Gaji PIN is 5678. Backend auto-detects an email placed anywhere in rows 6..40 cols 1..11 of a SLIP sheet (email_sheet). Manual email preservation logic is in import_excel line ~662 (only when sheet parse is empty). Frontend slipToPayload includes terbilang but PayslipIn doesn't (see code review). Consider adding `terbilang` to PayslipIn if regression appears on PDF generation after an in-UI slip edit.",
+  "rca of the issue": "N/A — all requested new features work end-to-end."
+}

@@ -1,0 +1,37 @@
+{
+  "summary": "Re-test after Gaji PIN reset bug fix (design v2 — NO portal PIN). All 23 backend tests PASS including two dedicated bug-fix cases (test_f: /gaji-pin/reset-apply and test_g: /set-pin fallback) that confirm herliana can create a NEW Gaji PIN after susanto approves reset WITHOUT the old PIN — the previous 'PIN Gaji lama salah' error is gone. Full end-to-end Playwright flow also passes: (1) herliana logs in and lands directly on hrd-home (no portal PIN); (2) first click on hrd-card-gaji opens create-PIN dialog (5678 set); (3) after Lock + wrong PIN the hrd-gajipin-failed box + hrd-gajipin-request-reset button appear; (4) susanto (separate context) sees hrd-approve-notif, opens hrd-approve-dialog, clicks Setujui (no Data Gaji card visible for susanto); (5) herliana reloads → hrd-reset-notif visible AND clicking hrd-card-gaji opens hrd-reset-apply-dialog directly; (6) saving new PIN 4321 succeeds with NO 'PIN lama salah' error and new PIN unlocks hrd-gaji-area with all 4 tabs (slip/karyawan/email/settings). Heri sees only Dokumen HRD + Log Akses (no Data Gaji card). Excel import produces 5 slips and Wawan take_home = 8,138,000; PDF endpoint returns application/pdf.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/hrd/gaji-pin/request-reset", "issue": "Endpoint is guarded by _can_manage_pin so only herliana can request (design-correct), but note the earlier code review comment about heri being blocked here is now fine. Also /gaji-pin/approve-reset (no request_id) approves ALL pending via update_many — acceptable but multi-request UX may be confusing."},
+      {"endpoint": "pytest.ini", "issue": "pytest.ini enforces `-n 2 --dist loadscope` but state-sharing tests must run serial. Runs with `-n 0` deterministically pass 23/23."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_hris_flows.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "hrd.py set_pin bypass logic uses count on approved resets — clean and idempotent (also marks as resolved after set). Good.",
+    "hrd.py openGaji frontend routing: when gaji_reset_approved=True, hrd-card-gaji opens hrd-reset-apply-dialog directly — verified working. Users can't accidentally hit the verify-PIN path in that state.",
+    "server.py CORS still allow_origin_regex='.*' with allow_credentials=True — permissive; fine for preview but should be tightened in prod.",
+    "SUPER_ADMIN_USERNAME default in deps.py is 'susanto' which now matches the design (previously misaligned). Good.",
+    "hrd.py has_perm blocks super_admin from GAJI_GROUP — correctly enforced. Verified via /api/hrd/employees, /payslips, /settings returning 403 for susanto."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_hris_flows.py (rewritten for new design — no portal PIN; adds bugfix tests test_f & test_g)"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "100% of critical flows"},
+  "test_credentials": "susanto/Subbalo1994 (super_admin), herliana/123456 (payroll owner), heri/123456 (non-payroll). Final Gaji PIN after tests: 4321.",
+  "seed_data_creation": "During tests DB was cleaned, then herliana created gaji PIN 5678, went through reset flow with susanto, and final PIN=4321. Payslips for Aug 2025 (5 slips including Wawan take_home=8,138,000) inserted during backend test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Design v2: NO portal PIN. Only Gaji PIN gates the single 'Data Gaji' card. Run backend tests with `pytest -n 0 backend/tests/test_hris_flows.py` (pytest.ini forces -n 2 loadscope which conflicts with sequential state). Before running: clean hrd_settings, hrd_pin_resets, hrd_payslips, login_attempts collections, and $unset hrd_pin_hash on users. Bug fix code paths: routers/hrd.py::set_pin (bypasses old-PIN if approved reset exists) and routers/hrd.py::apply_gaji_pin_reset. Frontend: HrdPortalPage.jsx openGaji() branches to ResetApplyDialog when gaji_reset_approved.",
+  "rca of the issue": "Original bug: herliana couldn't set a new Gaji PIN after susanto approved a reset — server returned 'PIN Gaji lama salah'. Root cause: /api/hrd/set-pin unconditionally verified current_pin when pin_hash existed. Fix: set_pin now checks db.hrd_pin_resets for status='approved'; if present, it accepts new PIN without current_pin and marks the approved requests as 'resolved'. In parallel /api/hrd/gaji-pin/reset-apply provides the explicit reset path used by the frontend. Both paths verified in test_f and test_g."
+}

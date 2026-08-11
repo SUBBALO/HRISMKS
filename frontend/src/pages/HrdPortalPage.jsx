@@ -884,25 +884,28 @@ function SettingsSection({ hapi, can }) {
     <div className="max-w-2xl" data-testid="hrd-settings">
       <h2 className="text-base font-bold text-slate-800 mb-4">Pengaturan Email (Gmail)</h2>
       <Card className="p-6 space-y-4">
-        <div className="flex items-start gap-2 text-xs bg-sky-50 border border-sky-200 text-sky-800 rounded-md p-3">
-          <ShieldCheck size={18} weight="fill" className="shrink-0 mt-0.5" />
-          <div>Gunakan <b>Gmail App Password</b> (bukan password login biasa). Buat di akun Google: <b>Security → 2-Step Verification → App passwords</b>. App Password disimpan aman di server dan tidak pernah ditampilkan kembali.</div>
-        </div>
-        <div><Label>Email Gmail Pengirim</Label><Input type="email" value={f.gmail_user} onChange={(e) => setF({ ...f, gmail_user: e.target.value })} placeholder="hrd@gmail.com" data-testid="hrd-set-gmail" /></div>
-        <div><Label>Nama Pengirim (tampil di email)</Label><Input value={f.sender_name} onChange={(e) => setF({ ...f, sender_name: e.target.value })} data-testid="hrd-set-sender" /></div>
-        <div><Label>App Password {hasPw && <span className="text-emerald-600 text-xs font-normal">(tersimpan ✓ — kosongkan bila tidak diubah)</span>}</Label>
-          <Input type="password" value={f.app_password} onChange={(e) => setF({ ...f, app_password: e.target.value })} placeholder={hasPw ? "••••••••••••" : "16 karakter app password"} data-testid="hrd-set-apppw" /></div>
-        <div className="flex items-start gap-2 text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded-md p-2.5">
-          <WarningCircle size={14} weight="fill" className="shrink-0 mt-0.5" /> Disarankan pakai akun <b>@gmail.com</b> agar email lolos autentikasi. Jika memakai domain sendiri (mis. @mitrakaryasarana.com via Google Workspace), pastikan <b>SPF</b> & <b>DKIM</b> domain sudah aktif — bila belum, Gmail menolak dengan error 5.7.26.
-        </div>
-
-        <div className="border-t border-slate-200 pt-4 mt-2">
-          <h3 className="text-sm font-bold text-slate-800 mb-1">Pesan Email Slip Gaji</h3>
+        <div>
+          <h3 className="text-sm font-bold text-slate-800 mb-1">✍️ Pesan Email Slip Gaji (bisa diedit)</h3>
           <div className="text-[11px] text-slate-500 mb-3">
             Variabel yang bisa dipakai: <code className="bg-slate-100 px-1 rounded">{"{nama}"}</code> <code className="bg-slate-100 px-1 rounded">{"{bulan}"}</code> <code className="bg-slate-100 px-1 rounded">{"{tahun}"}</code> <code className="bg-slate-100 px-1 rounded">{"{take_home}"}</code> <code className="bg-slate-100 px-1 rounded">{"{jabatan}"}</code> <code className="bg-slate-100 px-1 rounded">{"{nik}"}</code> <code className="bg-slate-100 px-1 rounded">{"{sender}"}</code>
           </div>
           <div className="mb-3"><Label>Subjek Email</Label><Input value={f.email_subject} onChange={(e) => setF({ ...f, email_subject: e.target.value })} placeholder="Slip Gaji {bulan} {tahun} - {nama}" data-testid="hrd-set-subject" /></div>
           <div><Label>Isi Pesan</Label><Textarea rows={8} value={f.email_body} onChange={(e) => setF({ ...f, email_body: e.target.value })} className="font-mono text-xs" data-testid="hrd-set-body" /></div>
+        </div>
+
+        <div className="border-t border-slate-200 pt-4 space-y-4">
+          <h3 className="text-sm font-bold text-slate-800">Akun Pengirim (Gmail)</h3>
+          <div className="flex items-start gap-2 text-xs bg-sky-50 border border-sky-200 text-sky-800 rounded-md p-3">
+            <ShieldCheck size={18} weight="fill" className="shrink-0 mt-0.5" />
+            <div>Gunakan <b>Gmail App Password</b> (bukan password login biasa). Buat di akun Google: <b>Security → 2-Step Verification → App passwords</b>. App Password disimpan aman di server dan tidak pernah ditampilkan kembali.</div>
+          </div>
+          <div><Label>Email Gmail Pengirim</Label><Input type="email" value={f.gmail_user} onChange={(e) => setF({ ...f, gmail_user: e.target.value })} placeholder="hrd@gmail.com" data-testid="hrd-set-gmail" /></div>
+          <div><Label>Nama Pengirim (tampil di email)</Label><Input value={f.sender_name} onChange={(e) => setF({ ...f, sender_name: e.target.value })} data-testid="hrd-set-sender" /></div>
+          <div><Label>App Password {hasPw && <span className="text-emerald-600 text-xs font-normal">(tersimpan ✓ — kosongkan bila tidak diubah)</span>}</Label>
+            <Input type="password" value={f.app_password} onChange={(e) => setF({ ...f, app_password: e.target.value })} placeholder={hasPw ? "••••••••••••" : "16 karakter app password"} data-testid="hrd-set-apppw" /></div>
+          <div className="flex items-start gap-2 text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded-md p-2.5">
+            <WarningCircle size={14} weight="fill" className="shrink-0 mt-0.5" /> Disarankan pakai akun <b>@gmail.com</b> agar email lolos autentikasi. Jika memakai domain sendiri (mis. @mitrakaryasarana.com via Google Workspace), pastikan <b>SPF</b> & <b>DKIM</b> domain sudah aktif — bila belum, Gmail menolak dengan error 5.7.26.
+          </div>
         </div>
 
         {can?.edit && <Button className="bg-teal-600 hover:bg-teal-700" onClick={save} disabled={busy} data-testid="hrd-set-save">{busy ? "Menyimpan…" : "Simpan Pengaturan"}</Button>}

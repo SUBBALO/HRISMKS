@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+from email.utils import formatdate, make_msgid
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header
@@ -38,6 +39,23 @@ DEFAULT_EMAIL_BODY = (
 class _SafeDict(dict):
     def __missing__(self, key):
         return "{" + key + "}"
+
+
+def _smtp_friendly(err: str) -> str:
+    """Ubah pesan error SMTP teknis menjadi panduan yang bisa ditindaklanjuti."""
+    e = err or ""
+    low = e.lower()
+    if "5.7.26" in e or "unauthenticated" in low or ("spf" in low and "dkim" in low):
+        return ("Ditolak Gmail: domain pengirim belum lolos autentikasi SPF/DKIM. "
+                "Solusi: gunakan akun @gmail.com biasa sebagai pengirim, ATAU minta IT mengaktifkan "
+                "SPF (v=spf1 include:_spf.google.com ~all) & DKIM domain Anda di Google Workspace.")
+    if "5.7.8" in e or "username and password not accepted" in low or "authenticationerror" in low:
+        return "Login Gmail ditolak. Gunakan App Password (bukan password biasa) & pastikan 2FA aktif."
+    if "authentication required" in low or "5.7.0" in e:
+        return "Autentikasi diperlukan. Gunakan App Password Gmail di Pengaturan Email."
+    if "5.1.1" in e or "does not exist" in low or "no such user" in low:
+        return "Alamat email tujuan tidak ditemukan. Periksa kembali email karyawan."
+    return e[:220]
 
 # HRD menus (Accurate-style granular permission). Each menu supports actions:
 # view, create, edit, delete, report
@@ -1089,6 +1107,11 @@ async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_
                     msg = MIMEMultipart()
                     msg["From"] = f"{sender_name} <{gmail_user}>"
                     msg["To"] = email_to
+                    msg["Date"] = formatdate(localtime=True)
+                    try:
+                        msg["Message-ID"] = make_msgid(domain=gmail_user.split("@")[-1])
+                    except Exception:
+                        pass
                     msg["Subject"] = subj_tpl.format_map(tvars)
                     body = body_tpl.format_map(tvars)
                     msg.attach(MIMEText(body, "plain"))
@@ -1100,7 +1123,7 @@ async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_
                     server.sendmail(gmail_user, [email_to], msg.as_string())
                     status, err = "terkirim", ""
                 except Exception as e:
-                    status, err = "gagal", str(e)[:200]
+                    status, err = "gagal", _smtp_friendly(str(e))
             await db.hrd_payslips.update_one({"id": slip["id"]}, {"$set": {"email_status": status, "email_error": err, "sent_at": _now() if status == "terkirim" else None}})
             results.append({"id": slip["id"], "nama": slip.get("nama"), "email": email_to, "status": status, "error": err})
     finally:

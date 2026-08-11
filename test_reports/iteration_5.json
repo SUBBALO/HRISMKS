@@ -1,0 +1,23 @@
+{
+  "summary": "Verified Gmail SPF/DKIM (5.7.26) handling for HRD blast. All 7 backend tests pass: (a) _smtp_friendly maps 5.7.26 to friendly Indonesian message mentioning @gmail.com/SPF/DKIM, 5.7.8 to App Password hint, and falls back for unknown errors; (b) in-process blast() with fake SMTP_SSL surfaces the friendly error per-recipient (status='gagal', no raw '550 5.7.26' traceback) and also persists it to hrd_payslips.email_status/email_error; (c) success path: sendmail succeeds, results status='terkirim', outgoing MIME includes Date + Message-ID headers, From='PT. MITRA KARYA SARANA <gmail_user>', and PDF attachment contains no /Encrypt marker (unencrypted); (d) 400 regression when Gmail settings not configured returns detail containing 'Gmail belum dikonfigurasi'; (e) importing /tmp/gaji_new.xlsx into a fresh period creates 5 slips all populated with email from 'Daftar Gaji' sheet, and GET /api/hrd/payslips/{id}/pdf returns application/pdf starting with %PDF- and no /Encrypt. No real SMTP connection was made — smtplib.SMTP_SSL was monkeypatched in-process.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_smtp_friendly_and_blast.py",
+    "/app/test_reports/pytest/smtp_friendly_and_blast.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routers/hrd.py is 1137 lines — consider splitting (pin, payslip, blast, importer, pdf render) into submodules for maintainability.",
+    "blast() computes results but does not roll up per-error class — consider returning a summary count of SPF/DKIM failures to surface the config issue prominently in UI.",
+    "smtplib.SMTP_SSL is instantiated with timeout=30 but there is no retry/backoff on transient network errors during the loop; consider try/except around per-recipient sendmail with sane timeout separation from login."
+  ],
+  "updated_files": ["/app/backend/tests/test_smtp_friendly_and_blast.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "not tested"},
+  "test_credentials": "herliana / 123456 (hrd); susanto / Subbalo1994 (super_admin); heri / 123456. Gaji PIN = 1111 (verified via POST /api/hrd/verify-pin).",
+  "seed_data_creation": "In-process test transiently sets hrd_payslips.email_status='gagal' for July 2026 during blast test; reset back to 'belum' after run. Import regression uses period 3/2027 and cleans up via db.hrd_payslips.delete_many. Gmail settings (gmail_user + app_password) preserved.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Test file at /app/backend/tests/test_smtp_friendly_and_blast.py uses a shared asyncio loop (motor client is bound to it) and reads REACT_APP_BACKEND_URL from /app/frontend/.env if env var not set. Runs with `-n 0` (serial) — pytest.ini forces xdist so pass `-n 0` when invoking directly. The blast() failure test monkeypatches routers.hrd.smtplib.SMTP_SSL with a fake class raising SMTPDataError(550, b'5.7.26 ...'). If PIN 1111 stops working, clear hrd_settings.pin_hash in Mongo and set again.",
+  "rca of the issue": "N/A — verifying a completed fix. The original user report of '550 5.7.26 unauthenticated ... SPF/DKIM' is a Google Workspace domain authentication policy issue (sender @mitrakaryasarana.com lacks published SPF/DKIM for Google), not a code bug. The applied fix correctly (1) traps this per-recipient in blast(), (2) rewrites the technical error via _smtp_friendly() to Indonesian actionable guidance, (3) persists the friendly error to email_error, and (4) adds Date + Message-ID headers so Gmail accepts the envelope structure — all verified by tests."
+}

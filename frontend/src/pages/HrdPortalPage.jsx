@@ -892,6 +892,9 @@ function SettingsSection({ hapi, can }) {
         <div><Label>Nama Pengirim (tampil di email)</Label><Input value={f.sender_name} onChange={(e) => setF({ ...f, sender_name: e.target.value })} data-testid="hrd-set-sender" /></div>
         <div><Label>App Password {hasPw && <span className="text-emerald-600 text-xs font-normal">(tersimpan ✓ — kosongkan bila tidak diubah)</span>}</Label>
           <Input type="password" value={f.app_password} onChange={(e) => setF({ ...f, app_password: e.target.value })} placeholder={hasPw ? "••••••••••••" : "16 karakter app password"} data-testid="hrd-set-apppw" /></div>
+        <div className="flex items-start gap-2 text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded-md p-2.5">
+          <WarningCircle size={14} weight="fill" className="shrink-0 mt-0.5" /> Disarankan pakai akun <b>@gmail.com</b> agar email lolos autentikasi. Jika memakai domain sendiri (mis. @mitrakaryasarana.com via Google Workspace), pastikan <b>SPF</b> & <b>DKIM</b> domain sudah aktif — bila belum, Gmail menolak dengan error 5.7.26.
+        </div>
 
         <div className="border-t border-slate-200 pt-4 mt-2">
           <h3 className="text-sm font-bold text-slate-800 mb-1">Pesan Email Slip Gaji</h3>

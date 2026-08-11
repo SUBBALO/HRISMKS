@@ -1,0 +1,25 @@
+{
+  "summary": "Verified Gaji PIN persistence (herliana). Backend: 8/8 tests pass in /app/backend/tests/test_gaji_pin_persist_and_access.py covering (1) initial state gaji_pin_set=false after clearing hrd_settings.pin_hash, (2) POST /api/hrd/set-pin with pin=7788 -> 200 and my-access flips gaji_pin_set=true, (3) verify-pin 7788 returns 200 + gaji_token, (4) simulating a fresh login session still shows gaji_pin_set=true and verify-pin 7788 still returns 200 (PIN persists across sessions — the original user complaint was seeded by prior tests overwriting the shared PIN, not a code bug), (5) wrong pin 0000 -> 401 'PIN Gaji salah' without auto-triggering reset, (6) heri and susanto correctly get 403 on GET /api/hrd/payslips, (7) herliana with x-hrd-gaji header returns 200 with slip list, (8) final teardown clears pin_hash+pin_updated_at and hrd_pin_resets — confirmed via Mongo and my-access API. Frontend: manually exercised via Playwright — login herliana -> Data Gaji card opens CREATE dialog (has confirm input) -> create PIN 7788 -> gaji area shows -> Kunci Gaji -> logout -> re-login -> Data Gaji card now opens VERIFY dialog (no confirm input, confirming PIN persisted) -> wrong pin 0000 shows hrd-gajipin-failed box and dialog stays on verify (no auto-jump to reset) -> pin 7788 unlocks. FINAL STATE (verified via Mongo + API): gaji_pin_set=false, no pending/approved resets — real user will get CREATE dialog on next visit.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_gaji_pin_persist_and_access.py",
+    "/app/test_reports/pytest/gaji_pin_persist.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Legacy /api/hrd/portal-pin/set and /api/hrd/portal-pin/verify endpoints are still registered but no longer used by the frontend — consider removing to avoid accidental writes to a second PIN slot.",
+    "hrd_settings is a single global doc (_id='hrd') holding the shared Gaji PIN; any test/env sharing this collection will keep colliding. Consider namespacing PIN per-role owner (e.g., store under user_id of the HRD manager) so parallel test runs and future multi-HRD scenarios cannot overwrite the real user's PIN.",
+    "GET /api/hrd/payslips returns {items:[...]} but nearby list endpoints return bare arrays — inconsistent envelope shape across the router."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_gaji_pin_persist_and_access.py"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% (create+relogin+verify+wrong-pin+unlock all pass)"},
+  "test_credentials": "herliana / 123456 (hrd manager); susanto / Subbalo1994 (super_admin); heri / 123456. Test PIN used during run: 7788 — CLEARED at end.",
+  "seed_data_creation": "Transient during run only: pin_hash set to hash of '7788' then unset in final teardown. hrd_pin_resets left empty. hrd_settings.gmail_user/app_password/sender_name preserved untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "FINAL STATE: hrd_settings has no pin_hash/pin_updated_at; hrd_pin_resets is empty. Verified via Mongo (pymongo direct read) AND via GET /api/hrd/my-access as herliana (gaji_pin_set=false, gaji_reset_pending=0, gaji_reset_approved=false). If you re-run these tests, they self-clean at the end via test_99_final_cleanup_pin_cleared. Do NOT run test_gaji_pin_no_forced_reset.py after this because it leaves PIN=1111 set — run the new persist_and_access file instead.",
+  "rca of the issue": "User report 'PIN salah' after login was caused by the shared global hrd_settings.pin_hash being repeatedly overwritten by prior automated test iterations (each test set its own PIN — 1111, then later runs used other PINs). Because the schema stores a single global PIN doc rather than one per user, whichever value the last test wrote became authoritative, so herliana's remembered PIN was already stale. No code bug exists: set-pin/verify-pin/my-access all behave correctly (verified in 8/8 tests + full UI flow). Mitigation applied: pin_hash cleared at end of this run so herliana gets the CREATE dialog and sets a PIN that will now persist. Long-term recommendation captured in critical_code_review_comments: namespace the Gaji PIN per-user."
+}

@@ -24,6 +24,22 @@ router = APIRouter(prefix="/hrd", tags=["hrd"])
 ROMAN = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X", 11: "XI", 12: "XII"}
 BULAN_ID = {1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 5: "Mei", 6: "Juni", 7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember"}
 
+# Template pesan email default (bisa diubah dari menu Pengaturan Email)
+DEFAULT_EMAIL_SUBJECT = "Slip Gaji {bulan} {tahun} - {nama}"
+DEFAULT_EMAIL_BODY = (
+    "Yth. {nama},\n\n"
+    "Berikut kami lampirkan slip gaji Anda untuk periode {bulan} {tahun}.\n"
+    "Take Home Pay: {take_home}.\n\n"
+    "File PDF diproteksi password: tanggal lahir Anda dengan format DDMMYYYY (contoh: 17081990).\n\n"
+    "Dokumen ini bersifat rahasia. Mohon tidak menyebarkan.\n\n"
+    "Hormat kami,\n{sender}"
+)
+
+
+class _SafeDict(dict):
+    def __missing__(self, key):
+        return "{" + key + "}"
+
 # HRD menus (Accurate-style granular permission). Each menu supports actions:
 # view, create, edit, delete, report
 HRD_MENUS = [
@@ -327,6 +343,8 @@ class SettingsIn(BaseModel):
     gmail_user: str | None = None
     app_password: str | None = None
     sender_name: str | None = None
+    email_subject: str | None = None
+    email_body: str | None = None
 
 
 @router.get("/settings")
@@ -336,6 +354,8 @@ async def get_settings(current: dict = Depends(require_hrd_perm("hrd_settings", 
         "gmail_user": s.get("gmail_user", ""),
         "sender_name": s.get("sender_name", "PT. MITRA KARYA SARANA"),
         "has_app_password": bool(s.get("app_password")),
+        "email_subject": s.get("email_subject") or DEFAULT_EMAIL_SUBJECT,
+        "email_body": s.get("email_body") or DEFAULT_EMAIL_BODY,
     }
 
 
@@ -346,6 +366,10 @@ async def save_settings(payload: SettingsIn, current: dict = Depends(require_hrd
         upd["gmail_user"] = payload.gmail_user.strip()
     if payload.sender_name is not None:
         upd["sender_name"] = payload.sender_name.strip()
+    if payload.email_subject is not None:
+        upd["email_subject"] = payload.email_subject
+    if payload.email_body is not None:
+        upd["email_body"] = payload.email_body
     if payload.app_password:  # only overwrite when provided
         upd["app_password"] = payload.app_password.replace(" ", "").strip()
     upd["settings_updated_at"] = _now()
@@ -421,6 +445,7 @@ class PayslipIn(BaseModel):
     earnings: list[Component] = []
     deductions: list[Component] = []
     take_home: float | None = None
+    tanggal_lahir: str = ""
     notes: str = ""
 
 
@@ -508,6 +533,49 @@ def _numify(v):
         return None
     try:
         return float(v)
+    except Exception:
+        return None
+
+
+def _norm_date(v):
+    """Normalkan berbagai format tanggal ke ISO 'YYYY-MM-DD'."""
+    if v is None:
+        return ""
+    if not isinstance(v, str) and hasattr(v, "strftime"):
+        try:
+            return v.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    s = str(v).strip()
+    if not s:
+        return ""
+    import re
+    m = re.search(r"\b(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})\b", s)  # yyyy-mm-dd
+    if m:
+        y, mo, d = m.groups()
+        try:
+            return f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+        except Exception:
+            return ""
+    m = re.search(r"\b(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})\b", s)  # dd-mm-yyyy
+    if m:
+        d, mo, y = m.groups()
+        y = ("20" + y) if len(y) == 2 else y
+        try:
+            return f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+        except Exception:
+            return ""
+    return ""
+
+
+def _birth_password(slip):
+    """Password PDF = tanggal lahir format DDMMYYYY. None bila tidak ada."""
+    iso = _norm_date(slip.get("tanggal_lahir"))
+    if not iso:
+        return None
+    try:
+        y, m, d = iso.split("-")
+        return f"{int(d):02d}{int(m):02d}{int(y):04d}"
     except Exception:
         return None
 
@@ -603,6 +671,26 @@ def _parse_slip_sheet(ws, month, year):
         if email_sheet:
             break
     slip["email_sheet"] = email_sheet
+    # Deteksi tanggal lahir: cari label mengandung 'lahir' lalu ambil nilai tanggal di kanannya
+    tgl_lahir = ""
+    for r in range(6, max_row + 1):
+        for c in range(1, 12):
+            v = ws.cell(r, c).value
+            if isinstance(v, str) and "lahir" in v.lower():
+                nd = _norm_date(v)
+                if nd:
+                    tgl_lahir = nd
+                else:
+                    for cc in range(c + 1, 14):
+                        nd = _norm_date(ws.cell(r, cc).value)
+                        if nd:
+                            tgl_lahir = nd
+                            break
+            if tgl_lahir:
+                break
+        if tgl_lahir:
+            break
+    slip["tanggal_lahir"] = tgl_lahir
     slip["period_month"] = month
     slip["period_year"] = year
     return slip
@@ -662,6 +750,8 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
             # Pertahankan email yang sudah diisi manual bila hasil parse kosong
             if not slip.get("email") and existing.get("email"):
                 slip["email"] = existing["email"]
+            if not slip.get("tanggal_lahir") and existing.get("tanggal_lahir"):
+                slip["tanggal_lahir"] = existing["tanggal_lahir"]
             await db.hrd_payslips.update_one({"id": existing["id"]}, {"$set": slip})
             updated += 1
         else:
@@ -738,7 +828,7 @@ def _terbilang_rupiah(n) -> str:
     return " ".join(w.capitalize() for w in words.split()) + " Rupiah"
 
 
-def _render_slip_pdf(slip: dict, sender_name: str = "PT. MITRA KARYA SARANA", printed_by: str = "") -> io.BytesIO:
+def _render_slip_pdf(slip: dict, sender_name: str = "PT. MITRA KARYA SARANA", printed_by: str = "", password: str | None = None) -> io.BytesIO:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib import colors
@@ -746,7 +836,11 @@ def _render_slip_pdf(slip: dict, sender_name: str = "PT. MITRA KARYA SARANA", pr
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
     buf = io.BytesIO()
-    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=14 * mm, bottomMargin=12 * mm, leftMargin=16 * mm, rightMargin=16 * mm)
+    enc = None
+    if password:
+        from reportlab.lib import pdfencrypt
+        enc = pdfencrypt.StandardEncryption(userPassword=str(password), canPrint=1)
+    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=14 * mm, bottomMargin=12 * mm, leftMargin=16 * mm, rightMargin=16 * mm, encrypt=enc)
     styles = getSampleStyleSheet()
     small = ParagraphStyle("s", parent=styles["Normal"], fontSize=9)
     tiny = ParagraphStyle("tn", parent=styles["Normal"], fontSize=7.5, textColor=colors.HexColor("#475569"))
@@ -899,6 +993,8 @@ async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_
     gmail_user = s.get("gmail_user")
     app_pw = s.get("app_password")
     sender_name = s.get("sender_name") or "PT. MITRA KARYA SARANA"
+    subj_tpl = s.get("email_subject") or DEFAULT_EMAIL_SUBJECT
+    body_tpl = s.get("email_body") or DEFAULT_EMAIL_BODY
     if not gmail_user or not app_pw:
         raise HTTPException(status_code=400, detail="Email Gmail belum dikonfigurasi. Isi di tab Pengaturan.")
 
@@ -928,23 +1024,27 @@ async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_
                 err = "Email kosong"
             else:
                 try:
+                    tvars = _SafeDict({
+                        "nama": slip.get("nama", ""), "nik": slip.get("nik", ""),
+                        "jabatan": slip.get("jabatan", ""), "dept": slip.get("dept", ""),
+                        "bulan": BULAN_ID.get(payload.month, payload.month), "tahun": payload.year,
+                        "periode": per_label, "take_home": _rp(slip.get("take_home")),
+                        "sender": sender_name,
+                    })
                     msg = MIMEMultipart()
                     msg["From"] = f"{sender_name} <{gmail_user}>"
                     msg["To"] = email_to
-                    msg["Subject"] = f"Slip Gaji {per_label} - {slip.get('nama','')}"
-                    body = (f"Yth. {slip.get('nama','')},\n\n"
-                            f"Berikut kami lampirkan slip gaji Anda untuk periode {per_label}.\n"
-                            f"Take Home Pay: {_rp(slip.get('take_home'))}.\n\n"
-                            f"Dokumen ini bersifat rahasia. Mohon tidak menyebarkan.\n\n"
-                            f"Hormat kami,\n{sender_name}")
+                    msg["Subject"] = subj_tpl.format_map(tvars)
+                    body = body_tpl.format_map(tvars)
                     msg.attach(MIMEText(body, "plain"))
-                    pdf_buf = _render_slip_pdf(slip, sender_name, printed_by=current.get("name") or current.get("username", ""))
+                    pw = _birth_password(slip)
+                    pdf_buf = _render_slip_pdf(slip, sender_name, printed_by=current.get("name") or current.get("username", ""), password=pw)
                     part = MIMEApplication(pdf_buf.read(), _subtype="pdf")
                     part.add_header("Content-Disposition", "attachment",
                                     filename=f"SlipGaji_{per_label}_{slip.get('nama','')}.pdf".replace(" ", "_"))
                     msg.attach(part)
                     server.sendmail(gmail_user, [email_to], msg.as_string())
-                    status, err = "terkirim", ""
+                    status, err = "terkirim", ("" if pw else "terkirim tanpa password (tgl lahir kosong)")
                 except Exception as e:
                     status, err = "gagal", str(e)[:200]
             await db.hrd_payslips.update_one({"id": slip["id"]}, {"$set": {"email_status": status, "email_error": err, "sent_at": _now() if status == "terkirim" else None}})

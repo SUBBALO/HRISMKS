@@ -9,6 +9,7 @@ import { Label } from "../components/ui/label";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+import { Textarea } from "../components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -38,7 +39,7 @@ const slipToPayload = (s, patch = {}) => ({
   no_rekening: s.no_rekening || "", bank: s.bank || "",
   earnings: (s.earnings || []).map((e) => ({ label: e.label || "", amount: Number(e.amount) || 0, qty: e.qty ?? null, unit: e.unit ?? null })),
   deductions: (s.deductions || []).map((e) => ({ label: e.label || "", amount: Number(e.amount) || 0, qty: e.qty ?? null, unit: e.unit ?? null })),
-  take_home: s.take_home ?? null, terbilang: s.terbilang || "", notes: s.notes || "",
+  take_home: s.take_home ?? null, tanggal_lahir: s.tanggal_lahir || "", terbilang: s.terbilang || "", notes: s.notes || "",
   ...patch,
 });
 
@@ -695,6 +696,7 @@ function PayslipDetailDialog({ slip, hapi, onClose, onSaved }) {
           <div><Label>Nama</Label><Input value={f.nama || ""} onChange={(e) => setF({ ...f, nama: e.target.value })} data-testid="hrd-slip-f-nama" /></div>
           <div><Label>Jabatan</Label><Input value={f.jabatan || ""} onChange={(e) => setF({ ...f, jabatan: e.target.value })} data-testid="hrd-slip-f-jabatan" /></div>
           <div className="col-span-2 md:col-span-2"><Label className="text-teal-700">Email (untuk kirim slip)</Label><Input type="email" value={f.email || ""} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="nama@perusahaan.com" data-testid="hrd-slip-f-email" /></div>
+          <div><Label className="text-teal-700">Tanggal Lahir</Label><Input type="date" value={(f.tanggal_lahir || "").slice(0, 10)} onChange={(e) => setF({ ...f, tanggal_lahir: e.target.value })} data-testid="hrd-slip-f-lahir" /><p className="text-[10px] text-slate-400 mt-0.5">Password PDF (DDMMYYYY)</p></div>
           <div><Label>Departemen</Label><Input value={f.dept || ""} onChange={(e) => setF({ ...f, dept: e.target.value })} data-testid="hrd-slip-f-dept" /></div>
           <div><Label>Bank</Label><Input value={f.bank || ""} onChange={(e) => setF({ ...f, bank: e.target.value })} /></div>
           <div><Label>No. Rekening</Label><Input value={f.no_rekening || ""} onChange={(e) => setF({ ...f, no_rekening: e.target.value })} /></div>
@@ -862,19 +864,19 @@ function EmailSection({ hapi, can }) {
 
 /* ============================ Settings ============================ */
 function SettingsSection({ hapi, can }) {
-  const [f, setF] = useState({ gmail_user: "", sender_name: "PT. MITRA KARYA SARANA", app_password: "" });
+  const [f, setF] = useState({ gmail_user: "", sender_name: "PT. MITRA KARYA SARANA", app_password: "", email_subject: "", email_body: "" });
   const [hasPw, setHasPw] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     hapi.get("/hrd/settings").then((r) => {
-      setF((p) => ({ ...p, gmail_user: r.data.gmail_user || "", sender_name: r.data.sender_name || "PT. MITRA KARYA SARANA", app_password: "" }));
+      setF((p) => ({ ...p, gmail_user: r.data.gmail_user || "", sender_name: r.data.sender_name || "PT. MITRA KARYA SARANA", app_password: "", email_subject: r.data.email_subject || "", email_body: r.data.email_body || "" }));
       setHasPw(!!r.data.has_app_password);
     }).catch((e) => toast.error(errMsg(e)));
   }, [hapi]);
   const save = async () => {
     setBusy(true);
     try {
-      const body = { gmail_user: f.gmail_user, sender_name: f.sender_name };
+      const body = { gmail_user: f.gmail_user, sender_name: f.sender_name, email_subject: f.email_subject, email_body: f.email_body };
       if (f.app_password) body.app_password = f.app_password;
       await hapi.post("/hrd/settings", body);
       toast.success("Pengaturan tersimpan"); setF((p) => ({ ...p, app_password: "" })); if (f.app_password) setHasPw(true);
@@ -892,6 +894,19 @@ function SettingsSection({ hapi, can }) {
         <div><Label>Nama Pengirim (tampil di email)</Label><Input value={f.sender_name} onChange={(e) => setF({ ...f, sender_name: e.target.value })} data-testid="hrd-set-sender" /></div>
         <div><Label>App Password {hasPw && <span className="text-emerald-600 text-xs font-normal">(tersimpan ✓ — kosongkan bila tidak diubah)</span>}</Label>
           <Input type="password" value={f.app_password} onChange={(e) => setF({ ...f, app_password: e.target.value })} placeholder={hasPw ? "••••••••••••" : "16 karakter app password"} data-testid="hrd-set-apppw" /></div>
+
+        <div className="border-t border-slate-200 pt-4 mt-2">
+          <h3 className="text-sm font-bold text-slate-800 mb-1">Pesan Email Slip Gaji</h3>
+          <div className="text-[11px] text-slate-500 mb-3">
+            Variabel yang bisa dipakai: <code className="bg-slate-100 px-1 rounded">{"{nama}"}</code> <code className="bg-slate-100 px-1 rounded">{"{bulan}"}</code> <code className="bg-slate-100 px-1 rounded">{"{tahun}"}</code> <code className="bg-slate-100 px-1 rounded">{"{take_home}"}</code> <code className="bg-slate-100 px-1 rounded">{"{jabatan}"}</code> <code className="bg-slate-100 px-1 rounded">{"{nik}"}</code> <code className="bg-slate-100 px-1 rounded">{"{sender}"}</code>
+          </div>
+          <div className="mb-3"><Label>Subjek Email</Label><Input value={f.email_subject} onChange={(e) => setF({ ...f, email_subject: e.target.value })} placeholder="Slip Gaji {bulan} {tahun} - {nama}" data-testid="hrd-set-subject" /></div>
+          <div><Label>Isi Pesan</Label><Textarea rows={8} value={f.email_body} onChange={(e) => setF({ ...f, email_body: e.target.value })} className="font-mono text-xs" data-testid="hrd-set-body" /></div>
+          <div className="flex items-start gap-2 text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded-md p-2.5 mt-2">
+            <LockKey size={14} weight="fill" className="shrink-0 mt-0.5" /> PDF slip yang dikirim otomatis diproteksi password = <b>tanggal lahir (DDMMYYYY)</b> karyawan. Isi tanggal lahir di dialog edit slip atau lewat Excel. Bila kosong, PDF terkirim tanpa password.
+          </div>
+        </div>
+
         {can?.edit && <Button className="bg-teal-600 hover:bg-teal-700" onClick={save} disabled={busy} data-testid="hrd-set-save">{busy ? "Menyimpan…" : "Simpan Pengaturan"}</Button>}
       </Card>
     </div>

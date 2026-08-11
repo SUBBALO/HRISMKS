@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 4: Tested two new features — (A) editable email template subject/body in Pengaturan Email, and (B) birth-date field on payslip + PDF password encryption. Backend: 7/7 new pytest cases PASS (1 skipped intentionally — see below). GET /api/hrd/settings returns email_subject/email_body defaults containing {nama}; POST persists custom values (verified via GET). PUT /api/hrd/payslips/{id} with tanggal_lahir='1990-08-17' persists and is echoed back in list. Importer auto-detects tanggal_lahir: injecting 'Tgl Lahir : 1990-08-17' in cell B11 of a slip sheet imports payslip.tanggal_lahir='1990-08-17'. Re-importing the original xlsx (no lahir label) over a slip whose tanggal_lahir was set manually preserves the manual value. _render_slip_pdf(slip, password=_birth_password(slip)) with tanggal_lahir='1990-08-17' produces password='17081990' and PDF bytes contain b'/Encrypt'; with password=None the bytes do NOT contain b'/Encrypt'. GET /api/hrd/payslips/{id}/pdf preview returns application/pdf 200 and content is UNENCRYPTED (no b'/Encrypt'). Frontend Playwright: login herliana/123456, unlock Gaji card with PIN 5678, Pengaturan Email tab shows default subject 'Slip Gaji {bulan} {tahun} - {nama}' + default body containing {nama}. Editing hrd-set-subject to 'Slip {bulan} {tahun} - {nama}' and hrd-set-body to a custom text, clicking hrd-set-save, then reloading and reopening the tab shows both fields preserved exactly. Slip Gaji tab: opening a slip via hrd-slip-edit-<id> shows the new 'Tanggal Lahir' input hrd-slip-f-lahir with helper 'Password PDF (DDMMYYYY)'. Filling 1990-08-17 and clicking Simpan closes the dialog (toast 'Slip diperbarui'); re-opening the same slip shows the date retained.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_email_template_and_pdf_encrypt.py",
+    "/app/test_reports/pytest/iter4.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Blast endpoint returns 400 'Email Gmail belum dikonfigurasi' when gmail_user or app_password missing — verified by code inspection (routers/hrd.py:998). Runtime test was skipped because this env has has_app_password=true; do NOT attempt real send. Logic correctly formats subject/body with _SafeDict and attaches password-protected PDF via _birth_password(slip).",
+    "_parse_slip_sheet lahir-detection scans cols 1..11 rows 6..40 (col L / row >40 will be ignored). Fine for current MKS template.",
+    "SettingsIn accepts email_subject/email_body as Optional[str]; empty string '' would be treated as truthy at get_settings only via `or DEFAULT` — since '' is falsy Python-wise, this correctly falls back to default. Good.",
+    "_render_slip_pdf uses reportlab pdfencrypt.StandardEncryption(userPassword=..., canPrint=1) — encrypted output opens with the DDMMYYYY password in standard readers.",
+    "import_excel preserves manually-set tanggal_lahir via `if not slip.get('tanggal_lahir') and existing.get('tanggal_lahir')` (routers/hrd.py:753)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_email_template_and_pdf_encrypt.py (new)"
+  ],
+  "success_rate": {"backend": "100% (7/7 passed, 1 intentionally skipped)", "frontend": "100% (both new UI flows pass)"},
+  "test_credentials": "herliana/123456 (Gaji PIN 5678), susanto/Subbalo1994, heri/123456",
+  "seed_data_creation": "During tests month=10/2026 slips were created for importer testing then DELETED (cleanup). Month=8/2026 slips were RE-IMPORTED from /tmp/gaji.xlsx after tests (5 slips restored). NOTE: wawan (8/2026) tanggal_lahir='1990-08-17' remains from test_put_payslip_persists_tanggal_lahir since re-import preserves manual values when sheet has no lahir label — this is expected behavior. Also (per iteration 3) wawan.email=test1@mks.co.id and harjono(8/2026).email=regression.change@mks.co.id. Email template was RESTORED to sensible defaults after tests (Subject: 'Slip Gaji {bulan} {tahun} - {nama}', Body: standard Indonesian template).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run: pytest -n 0 backend/tests/test_email_template_and_pdf_encrypt.py backend/tests/test_new_payslip_edit_and_email.py. Gaji PIN=5678. The blast() 400-guard test is skipped when has_app_password=true in this env; do NOT attempt real blast (Gmail is actually configured). To hit the guard, unset app_password in Mongo hrd_settings first. Birth-date password format is DDMMYYYY (from ISO YYYY-MM-DD via _birth_password). Importer looks for 'lahir' label in cols A..K rows 6..40; put label+date in same cell OR on the same row to the right.",
+  "rca of the issue": "N/A — all new features work end-to-end."
+}

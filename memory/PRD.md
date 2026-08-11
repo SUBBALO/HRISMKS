@@ -24,6 +24,7 @@ Extract ONLY the HRD module from an existing ERP (github.com/SUBBALO/PROCUREMENT
 - 2026-06: Gaji PIN system (single PIN) with reset workflow (herliana request -> susanto approve -> herliana set new).
 - 2026-06: Payslip detail edit dialog (identity, email, earnings/deductions line items with qty/unit, Take Home) + inline email edit in Kirim Email tab + importer email auto-detection.
 - 2026-06: Branding — MKS logo, MKS building login background, "Human Resources Information System", credit "Developed by Susanto | Purchasing".
+- 2026-06: Flexible SMTP (replaced Gmail-only). Pengaturan Email now has generic SMTP fields: Host, Port, Keamanan (SSL/STARTTLS), Username, Nama Pengirim, Password. Backend `_open_smtp()` branches SSL (SMTP_SSL:465) vs STARTTLS (SMTP+starttls:587); provider-agnostic friendly errors; new `POST /api/hrd/settings/test` (Test Koneksi SMTP button). Verified via curl (save/get/test reaches smtp.hostinger.com). Works with Hostinger Business Email.
 - Testing: iteration_1/2/3 all 100% (backend + frontend).
 
 ## Backlog
@@ -33,4 +34,4 @@ Extract ONLY the HRD module from an existing ERP (github.com/SUBBALO/PROCUREMENT
 - P2: HR dashboard (headcount, payroll totals per period).
 
 ## Not Verified / Notes
-- Email blast requires a real Gmail App Password configured in Pengaturan Email (not set in demo) — actual sending not tested end-to-end.
+- Email blast requires real SMTP credentials configured in Pengaturan Email (Host/Port/Username/Password) — not set in demo, so actual sending not tested end-to-end. Recommended: Hostinger Business Email (smtp.hostinger.com, 465 SSL / 587 TLS). Using own domain avoids the Gmail SPF/DKIM 5.7.26 rejection.

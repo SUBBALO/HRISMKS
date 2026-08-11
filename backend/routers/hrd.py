@@ -42,20 +42,37 @@ class _SafeDict(dict):
 
 
 def _smtp_friendly(err: str) -> str:
-    """Ubah pesan error SMTP teknis menjadi panduan yang bisa ditindaklanjuti."""
+    """Ubah pesan error SMTP teknis menjadi panduan yang bisa ditindaklanjuti (umum, semua provider)."""
     e = err or ""
     low = e.lower()
     if "5.7.26" in e or "unauthenticated" in low or ("spf" in low and "dkim" in low):
-        return ("Ditolak Gmail: domain pengirim belum lolos autentikasi SPF/DKIM. "
-                "Solusi: gunakan akun @gmail.com biasa sebagai pengirim, ATAU minta IT mengaktifkan "
-                "SPF (v=spf1 include:_spf.google.com ~all) & DKIM domain Anda di Google Workspace.")
-    if "5.7.8" in e or "username and password not accepted" in low or "authenticationerror" in low:
-        return "Login Gmail ditolak. Gunakan App Password (bukan password biasa) & pastikan 2FA aktif."
+        return ("Ditolak server penerima: domain pengirim belum lolos autentikasi SPF/DKIM. "
+                "Aktifkan SPF & DKIM untuk domain Anda di pengaturan DNS hosting.")
+    if "5.7.8" in e or "username and password not accepted" in low or "authenticationerror" in low or "authentication failed" in low:
+        return "Login SMTP ditolak. Periksa Username & Password email di Pengaturan Email."
     if "authentication required" in low or "5.7.0" in e:
-        return "Autentikasi diperlukan. Gunakan App Password Gmail di Pengaturan Email."
+        return "Autentikasi diperlukan. Isi Username & Password SMTP di Pengaturan Email."
     if "5.1.1" in e or "does not exist" in low or "no such user" in low:
         return "Alamat email tujuan tidak ditemukan. Periksa kembali email karyawan."
+    if "getaddrinfo" in low or "name or service not known" in low or "connection refused" in low or "timed out" in low or "timeout" in low:
+        return "Gagal terhubung ke server SMTP. Periksa SMTP Host, Port, dan pilihan Keamanan (SSL/TLS)."
+    if "wrong version number" in low or "ssl" in low:
+        return "Kesalahan SSL/TLS. Untuk port 465 pilih SSL, untuk port 587 pilih TLS (STARTTLS)."
     return e[:220]
+
+
+def _open_smtp(host: str, port: int, security: str, username: str, password: str, timeout: int = 30):
+    """Buka koneksi SMTP sesuai mode keamanan lalu login. security: 'ssl' atau 'tls'."""
+    context = ssl.create_default_context()
+    if (security or "ssl").lower() == "ssl":
+        server = smtplib.SMTP_SSL(host, port, context=context, timeout=timeout)
+    else:  # tls / starttls
+        server = smtplib.SMTP(host, port, timeout=timeout)
+        server.ehlo()
+        server.starttls(context=context)
+        server.ehlo()
+    server.login(username, password)
+    return server
 
 # HRD menus (Accurate-style granular permission). Each menu supports actions:
 # view, create, edit, delete, report
@@ -355,10 +372,13 @@ async def hrd_logs(current: dict = Depends(require_hrd)):
     return {"items": items}
 
 
-# ---------------- Settings (Gmail SMTP) ----------------
+# ---------------- Settings (SMTP fleksibel) ----------------
 class SettingsIn(BaseModel):
-    gmail_user: str | None = None
-    app_password: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_security: str | None = None  # "ssl" | "tls"
+    smtp_username: str | None = None
+    smtp_password: str | None = None
     sender_name: str | None = None
     email_subject: str | None = None
     email_body: str | None = None
@@ -368,9 +388,12 @@ class SettingsIn(BaseModel):
 async def get_settings(current: dict = Depends(require_hrd_perm("hrd_settings", "view"))):
     s = await db.hrd_settings.find_one({"_id": "hrd"}) or {}
     return {
-        "gmail_user": s.get("gmail_user", ""),
+        "smtp_host": s.get("smtp_host", ""),
+        "smtp_port": s.get("smtp_port", 465),
+        "smtp_security": s.get("smtp_security", "ssl"),
+        "smtp_username": s.get("smtp_username", ""),
+        "has_smtp_password": bool(s.get("smtp_password")),
         "sender_name": s.get("sender_name", "PT. MITRA KARYA SARANA"),
-        "has_app_password": bool(s.get("app_password")),
         "email_subject": s.get("email_subject") or DEFAULT_EMAIL_SUBJECT,
         "email_body": s.get("email_body") or DEFAULT_EMAIL_BODY,
     }
@@ -379,19 +402,45 @@ async def get_settings(current: dict = Depends(require_hrd_perm("hrd_settings", 
 @router.post("/settings")
 async def save_settings(payload: SettingsIn, current: dict = Depends(require_hrd_perm("hrd_settings", "edit"))):
     upd = {}
-    if payload.gmail_user is not None:
-        upd["gmail_user"] = payload.gmail_user.strip()
+    if payload.smtp_host is not None:
+        upd["smtp_host"] = payload.smtp_host.strip()
+    if payload.smtp_port is not None:
+        upd["smtp_port"] = int(payload.smtp_port)
+    if payload.smtp_security is not None:
+        upd["smtp_security"] = "ssl" if payload.smtp_security.lower() == "ssl" else "tls"
+    if payload.smtp_username is not None:
+        upd["smtp_username"] = payload.smtp_username.strip()
     if payload.sender_name is not None:
         upd["sender_name"] = payload.sender_name.strip()
     if payload.email_subject is not None:
         upd["email_subject"] = payload.email_subject
     if payload.email_body is not None:
         upd["email_body"] = payload.email_body
-    if payload.app_password:  # only overwrite when provided
-        upd["app_password"] = payload.app_password.replace(" ", "").strip()
+    if payload.smtp_password:  # only overwrite when provided
+        upd["smtp_password"] = payload.smtp_password.strip()
     upd["settings_updated_at"] = _now()
     await db.hrd_settings.update_one({"_id": "hrd"}, {"$set": upd}, upsert=True)
     return {"success": True}
+
+
+@router.post("/settings/test")
+async def test_settings(current: dict = Depends(require_hrd_perm("hrd_settings", "edit"))):
+    """Uji koneksi & login SMTP tanpa mengirim email."""
+    s = await db.hrd_settings.find_one({"_id": "hrd"}) or {}
+    host, port = s.get("smtp_host"), int(s.get("smtp_port") or 465)
+    security = s.get("smtp_security") or "ssl"
+    user, pw = s.get("smtp_username"), s.get("smtp_password")
+    if not host or not user or not pw:
+        raise HTTPException(status_code=400, detail="Pengaturan SMTP belum lengkap. Isi Host, Username, dan Password.")
+    try:
+        server = _open_smtp(host, port, security, user, pw)
+        try:
+            server.quit()
+        except Exception:
+            pass
+        return {"success": True, "message": f"Koneksi ke {host}:{port} berhasil. Login SMTP OK."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=_smtp_friendly(str(e)))
 
 
 # ---------------- Employees ----------------
@@ -1063,13 +1112,16 @@ class BlastIn(BaseModel):
 @router.post("/blast")
 async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_email", "create"))):
     s = await db.hrd_settings.find_one({"_id": "hrd"}) or {}
-    gmail_user = s.get("gmail_user")
-    app_pw = s.get("app_password")
+    smtp_host = s.get("smtp_host")
+    smtp_port = int(s.get("smtp_port") or 465)
+    smtp_security = s.get("smtp_security") or "ssl"
+    smtp_user = s.get("smtp_username")
+    smtp_pw = s.get("smtp_password")
     sender_name = s.get("sender_name") or "PT. MITRA KARYA SARANA"
     subj_tpl = s.get("email_subject") or DEFAULT_EMAIL_SUBJECT
     body_tpl = s.get("email_body") or DEFAULT_EMAIL_BODY
-    if not gmail_user or not app_pw:
-        raise HTTPException(status_code=400, detail="Email Gmail belum dikonfigurasi. Isi di tab Pengaturan.")
+    if not smtp_host or not smtp_user or not smtp_pw:
+        raise HTTPException(status_code=400, detail="SMTP belum dikonfigurasi. Isi Host, Username & Password di tab Pengaturan Email.")
 
     flt = {"period_month": payload.month, "period_year": payload.year, **NOT_DELETED_FILTER}
     if payload.ids:
@@ -1081,13 +1133,11 @@ async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_
     per_label = f"{BULAN_ID.get(payload.month, payload.month)} {payload.year}"
     results = []
     try:
-        context = ssl.create_default_context()
-        server = smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=30)
-        server.login(gmail_user, app_pw)
+        server = _open_smtp(smtp_host, smtp_port, smtp_security, smtp_user, smtp_pw)
     except smtplib.SMTPAuthenticationError:
-        raise HTTPException(status_code=400, detail="Login Gmail gagal. Pastikan email & App Password benar (bukan password biasa).")
+        raise HTTPException(status_code=400, detail="Login SMTP gagal. Periksa Username & Password email.")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Gagal koneksi ke Gmail: {e}")
+        raise HTTPException(status_code=400, detail=_smtp_friendly(str(e)))
 
     try:
         for slip in slips:
@@ -1105,11 +1155,11 @@ async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_
                         "sender": sender_name,
                     })
                     msg = MIMEMultipart()
-                    msg["From"] = f"{sender_name} <{gmail_user}>"
+                    msg["From"] = f"{sender_name} <{smtp_user}>"
                     msg["To"] = email_to
                     msg["Date"] = formatdate(localtime=True)
                     try:
-                        msg["Message-ID"] = make_msgid(domain=gmail_user.split("@")[-1])
+                        msg["Message-ID"] = make_msgid(domain=smtp_user.split("@")[-1])
                     except Exception:
                         pass
                     msg["Subject"] = subj_tpl.format_map(tvars)
@@ -1120,7 +1170,7 @@ async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_
                     part.add_header("Content-Disposition", "attachment",
                                     filename=f"SlipGaji_{per_label}_{slip.get('nama','')}.pdf".replace(" ", "_"))
                     msg.attach(part)
-                    server.sendmail(gmail_user, [email_to], msg.as_string())
+                    server.sendmail(smtp_user, [email_to], msg.as_string())
                     status, err = "terkirim", ""
                 except Exception as e:
                     status, err = "gagal", _smtp_friendly(str(e))

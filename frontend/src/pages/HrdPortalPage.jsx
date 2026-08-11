@@ -775,7 +775,7 @@ function EmailSection({ hapi, can }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { hapi.get("/hrd/settings").then((r) => setSettings(r.data)).catch(() => {}); }, [hapi]);
 
-  const gmailReady = settings?.gmail_user && settings?.has_app_password;
+  const gmailReady = settings?.smtp_host && settings?.smtp_username && settings?.has_smtp_password;
   const selectedIds = Object.keys(sel).filter((k) => sel[k]);
   const allChecked = items.length > 0 && selectedIds.length === items.length;
 
@@ -806,7 +806,7 @@ function EmailSection({ hapi, can }) {
 
       {!gmailReady && (
         <div className="flex items-center justify-between gap-3 text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-md p-3 mb-4" data-testid="hrd-email-warning">
-          <span className="flex items-center gap-2"><WarningCircle size={18} weight="fill" /> Email Gmail belum dikonfigurasi. Atur dulu di tab Pengaturan Email.</span>
+          <span className="flex items-center gap-2"><WarningCircle size={18} weight="fill" /> SMTP email belum dikonfigurasi. Atur dulu di tab Pengaturan Email.</span>
         </div>
       )}
 
@@ -862,27 +862,49 @@ function EmailSection({ hapi, can }) {
 
 /* ============================ Settings ============================ */
 function SettingsSection({ hapi, can }) {
-  const [f, setF] = useState({ gmail_user: "", sender_name: "PT. MITRA KARYA SARANA", app_password: "", email_subject: "", email_body: "" });
+  const [f, setF] = useState({ smtp_host: "", smtp_port: 465, smtp_security: "ssl", smtp_username: "", smtp_password: "", sender_name: "PT. MITRA KARYA SARANA", email_subject: "", email_body: "" });
   const [hasPw, setHasPw] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
   useEffect(() => {
     hapi.get("/hrd/settings").then((r) => {
-      setF((p) => ({ ...p, gmail_user: r.data.gmail_user || "", sender_name: r.data.sender_name || "PT. MITRA KARYA SARANA", app_password: "", email_subject: r.data.email_subject || "", email_body: r.data.email_body || "" }));
-      setHasPw(!!r.data.has_app_password);
+      setF((p) => ({
+        ...p,
+        smtp_host: r.data.smtp_host || "",
+        smtp_port: r.data.smtp_port || 465,
+        smtp_security: r.data.smtp_security || "ssl",
+        smtp_username: r.data.smtp_username || "",
+        smtp_password: "",
+        sender_name: r.data.sender_name || "PT. MITRA KARYA SARANA",
+        email_subject: r.data.email_subject || "",
+        email_body: r.data.email_body || "",
+      }));
+      setHasPw(!!r.data.has_smtp_password);
     }).catch((e) => toast.error(errMsg(e)));
   }, [hapi]);
   const save = async () => {
     setBusy(true);
     try {
-      const body = { gmail_user: f.gmail_user, sender_name: f.sender_name, email_subject: f.email_subject, email_body: f.email_body };
-      if (f.app_password) body.app_password = f.app_password;
+      const body = {
+        smtp_host: f.smtp_host, smtp_port: Number(f.smtp_port) || 465, smtp_security: f.smtp_security,
+        smtp_username: f.smtp_username, sender_name: f.sender_name,
+        email_subject: f.email_subject, email_body: f.email_body,
+      };
+      if (f.smtp_password) body.smtp_password = f.smtp_password;
       await hapi.post("/hrd/settings", body);
-      toast.success("Pengaturan tersimpan"); setF((p) => ({ ...p, app_password: "" })); if (f.app_password) setHasPw(true);
+      toast.success("Pengaturan tersimpan"); setF((p) => ({ ...p, smtp_password: "" })); if (f.smtp_password) setHasPw(true);
     } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+  };
+  const testConn = async () => {
+    setTesting(true);
+    try {
+      const r = await hapi.post("/hrd/settings/test");
+      toast.success(r.data?.message || "Koneksi SMTP berhasil");
+    } catch (e) { toast.error(errMsg(e)); } finally { setTesting(false); }
   };
   return (
     <div className="max-w-2xl" data-testid="hrd-settings">
-      <h2 className="text-base font-bold text-slate-800 mb-4">Pengaturan Email (Gmail)</h2>
+      <h2 className="text-base font-bold text-slate-800 mb-4">Pengaturan Email (SMTP)</h2>
       <Card className="p-6 space-y-4">
         <div>
           <h3 className="text-sm font-bold text-slate-800 mb-1">✍️ Pesan Email Slip Gaji (bisa diedit)</h3>
@@ -894,21 +916,37 @@ function SettingsSection({ hapi, can }) {
         </div>
 
         <div className="border-t border-slate-200 pt-4 space-y-4">
-          <h3 className="text-sm font-bold text-slate-800">Akun Pengirim (Gmail)</h3>
+          <h3 className="text-sm font-bold text-slate-800">Server SMTP (Email Domain / Hosting)</h3>
           <div className="flex items-start gap-2 text-xs bg-sky-50 border border-sky-200 text-sky-800 rounded-md p-3">
             <ShieldCheck size={18} weight="fill" className="shrink-0 mt-0.5" />
-            <div>Gunakan <b>Gmail App Password</b> (bukan password login biasa). Buat di akun Google: <b>Security → 2-Step Verification → App passwords</b>. App Password disimpan aman di server dan tidak pernah ditampilkan kembali.</div>
+            <div>Masukkan data SMTP dari penyedia email/hosting Anda. Contoh Hostinger: Host <b>smtp.hostinger.com</b>, Port <b>465</b> (SSL) atau <b>587</b> (TLS), Username = alamat email lengkap, Password = password email. Password disimpan aman di server dan tidak ditampilkan kembali.</div>
           </div>
-          <div><Label>Email Gmail Pengirim</Label><Input type="email" value={f.gmail_user} onChange={(e) => setF({ ...f, gmail_user: e.target.value })} placeholder="hrd@gmail.com" data-testid="hrd-set-gmail" /></div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2"><Label>SMTP Host</Label><Input value={f.smtp_host} onChange={(e) => setF({ ...f, smtp_host: e.target.value })} placeholder="smtp.hostinger.com" data-testid="hrd-set-host" /></div>
+            <div><Label>Port</Label><Input type="number" value={f.smtp_port} onChange={(e) => setF({ ...f, smtp_port: e.target.value })} placeholder="465" data-testid="hrd-set-port" /></div>
+          </div>
+          <div>
+            <Label>Keamanan</Label>
+            <Select value={f.smtp_security} onValueChange={(v) => setF({ ...f, smtp_security: v, smtp_port: v === "ssl" ? 465 : 587 })}>
+              <SelectTrigger data-testid="hrd-set-security"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ssl">SSL / TLS (port 465)</SelectItem>
+                <SelectItem value="tls">STARTTLS (port 587)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div><Label>Username (alamat email pengirim)</Label><Input type="email" value={f.smtp_username} onChange={(e) => setF({ ...f, smtp_username: e.target.value })} placeholder="payroll@mitrakaryasarana.com" data-testid="hrd-set-username" /></div>
           <div><Label>Nama Pengirim (tampil di email)</Label><Input value={f.sender_name} onChange={(e) => setF({ ...f, sender_name: e.target.value })} data-testid="hrd-set-sender" /></div>
-          <div><Label>App Password {hasPw && <span className="text-emerald-600 text-xs font-normal">(tersimpan ✓ — kosongkan bila tidak diubah)</span>}</Label>
-            <Input type="password" value={f.app_password} onChange={(e) => setF({ ...f, app_password: e.target.value })} placeholder={hasPw ? "••••••••••••" : "16 karakter app password"} data-testid="hrd-set-apppw" /></div>
-          <div className="flex items-start gap-2 text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded-md p-2.5">
-            <WarningCircle size={14} weight="fill" className="shrink-0 mt-0.5" /> Disarankan pakai akun <b>@gmail.com</b> agar email lolos autentikasi. Jika memakai domain sendiri (mis. @mitrakaryasarana.com via Google Workspace), pastikan <b>SPF</b> & <b>DKIM</b> domain sudah aktif — bila belum, Gmail menolak dengan error 5.7.26.
-          </div>
+          <div><Label>Password Email {hasPw && <span className="text-emerald-600 text-xs font-normal">(tersimpan ✓ — kosongkan bila tidak diubah)</span>}</Label>
+            <Input type="password" value={f.smtp_password} onChange={(e) => setF({ ...f, smtp_password: e.target.value })} placeholder={hasPw ? "••••••••••••" : "password email"} data-testid="hrd-set-password" /></div>
         </div>
 
-        {can?.edit && <Button className="bg-teal-600 hover:bg-teal-700" onClick={save} disabled={busy} data-testid="hrd-set-save">{busy ? "Menyimpan…" : "Simpan Pengaturan"}</Button>}
+        {can?.edit && (
+          <div className="flex items-center gap-2">
+            <Button className="bg-teal-600 hover:bg-teal-700" onClick={save} disabled={busy} data-testid="hrd-set-save">{busy ? "Menyimpan…" : "Simpan Pengaturan"}</Button>
+            <Button variant="outline" onClick={testConn} disabled={testing} data-testid="hrd-set-test">{testing ? "Menguji…" : "Test Koneksi SMTP"}</Button>
+          </div>
+        )}
       </Card>
     </div>
   );

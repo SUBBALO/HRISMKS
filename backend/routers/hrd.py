@@ -30,7 +30,6 @@ DEFAULT_EMAIL_BODY = (
     "Yth. {nama},\n\n"
     "Berikut kami lampirkan slip gaji Anda untuk periode {bulan} {tahun}.\n"
     "Take Home Pay: {take_home}.\n\n"
-    "File PDF diproteksi password: tanggal lahir Anda dengan format DDMMYYYY (contoh: 17081990).\n\n"
     "Dokumen ini bersifat rahasia. Mohon tidak menyebarkan.\n\n"
     "Hormat kami,\n{sender}"
 )
@@ -1093,14 +1092,13 @@ async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_
                     msg["Subject"] = subj_tpl.format_map(tvars)
                     body = body_tpl.format_map(tvars)
                     msg.attach(MIMEText(body, "plain"))
-                    pw = _birth_password(slip)
-                    pdf_buf = _render_slip_pdf(slip, sender_name, printed_by=current.get("name") or current.get("username", ""), password=pw)
+                    pdf_buf = _render_slip_pdf(slip, sender_name, printed_by=current.get("name") or current.get("username", ""))
                     part = MIMEApplication(pdf_buf.read(), _subtype="pdf")
                     part.add_header("Content-Disposition", "attachment",
                                     filename=f"SlipGaji_{per_label}_{slip.get('nama','')}.pdf".replace(" ", "_"))
                     msg.attach(part)
                     server.sendmail(gmail_user, [email_to], msg.as_string())
-                    status, err = "terkirim", ("" if pw else "terkirim tanpa password (tgl lahir kosong)")
+                    status, err = "terkirim", ""
                 except Exception as e:
                     status, err = "gagal", str(e)[:200]
             await db.hrd_payslips.update_one({"id": slip["id"]}, {"$set": {"email_status": status, "email_error": err, "sent_at": _now() if status == "terkirim" else None}})

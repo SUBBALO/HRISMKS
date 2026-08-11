@@ -694,8 +694,7 @@ function PayslipDetailDialog({ slip, hapi, onClose, onSaved }) {
           <div><Label>NIK</Label><Input value={f.nik || ""} onChange={(e) => setF({ ...f, nik: e.target.value })} data-testid="hrd-slip-f-nik" /></div>
           <div><Label>Nama</Label><Input value={f.nama || ""} onChange={(e) => setF({ ...f, nama: e.target.value })} data-testid="hrd-slip-f-nama" /></div>
           <div><Label>Jabatan</Label><Input value={f.jabatan || ""} onChange={(e) => setF({ ...f, jabatan: e.target.value })} data-testid="hrd-slip-f-jabatan" /></div>
-          <div className="col-span-2 md:col-span-2"><Label className="text-teal-700">Email (untuk kirim slip)</Label><Input type="email" value={f.email || ""} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="nama@perusahaan.com" data-testid="hrd-slip-f-email" /></div>
-          <div><Label className="text-teal-700">Tanggal Lahir</Label><Input type="date" value={(f.tanggal_lahir || "").slice(0, 10)} onChange={(e) => setF({ ...f, tanggal_lahir: e.target.value })} data-testid="hrd-slip-f-lahir" /><p className="text-[10px] text-slate-400 mt-0.5">Password PDF (DDMMYYYY)</p></div>
+          <div className="col-span-2 md:col-span-3"><Label className="text-teal-700">Email (untuk kirim slip)</Label><Input type="email" value={f.email || ""} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="nama@perusahaan.com" data-testid="hrd-slip-f-email" /></div>
           <div><Label>Departemen</Label><Input value={f.dept || ""} onChange={(e) => setF({ ...f, dept: e.target.value })} data-testid="hrd-slip-f-dept" /></div>
           <div><Label>Bank</Label><Input value={f.bank || ""} onChange={(e) => setF({ ...f, bank: e.target.value })} /></div>
           <div><Label>No. Rekening</Label><Input value={f.no_rekening || ""} onChange={(e) => setF({ ...f, no_rekening: e.target.value })} /></div>
@@ -901,9 +900,6 @@ function SettingsSection({ hapi, can }) {
           </div>
           <div className="mb-3"><Label>Subjek Email</Label><Input value={f.email_subject} onChange={(e) => setF({ ...f, email_subject: e.target.value })} placeholder="Slip Gaji {bulan} {tahun} - {nama}" data-testid="hrd-set-subject" /></div>
           <div><Label>Isi Pesan</Label><Textarea rows={8} value={f.email_body} onChange={(e) => setF({ ...f, email_body: e.target.value })} className="font-mono text-xs" data-testid="hrd-set-body" /></div>
-          <div className="flex items-start gap-2 text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded-md p-2.5 mt-2">
-            <LockKey size={14} weight="fill" className="shrink-0 mt-0.5" /> PDF slip yang dikirim otomatis diproteksi password = <b>tanggal lahir (DDMMYYYY)</b> karyawan. Isi tanggal lahir di dialog edit slip atau lewat Excel. Bila kosong, PDF terkirim tanpa password.
-          </div>
         </div>
 
         {can?.edit && <Button className="bg-teal-600 hover:bg-teal-700" onClick={save} disabled={busy} data-testid="hrd-set-save">{busy ? "Menyimpan…" : "Simpan Pengaturan"}</Button>}

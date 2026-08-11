@@ -175,8 +175,8 @@ async def set_pin(payload: PinIn, current: dict = Depends(get_current_user)):
         if not (payload.current_pin and verify_password(payload.current_pin, s["pin_hash"])):
             raise HTTPException(status_code=400, detail="PIN Gaji lama salah")
     await db.hrd_settings.update_one({"_id": "hrd"}, {"$set": {"pin_hash": hash_password(payload.pin), "pin_updated_at": _now()}}, upsert=True)
-    if approved:
-        await db.hrd_pin_resets.update_many({"status": "approved"}, {"$set": {"status": "resolved", "resolved_at": _now()}})
+    # Bersihkan semua permintaan reset yang belum selesai agar tidak muncul terus
+    await db.hrd_pin_resets.update_many({"status": {"$in": ["pending", "approved"]}}, {"$set": {"status": "resolved", "resolved_at": _now()}})
     await log_action(current, "hrd_set_pin", "hrd_settings", "hrd", {"via": "reset" if approved else "normal"})
     return {"success": True}
 
@@ -580,6 +580,49 @@ def _birth_password(slip):
         return None
 
 
+def _parse_directory(wb):
+    """Baca sheet direktori (mis. 'Daftar Gaji') yang punya header NAMA & EMAIL.
+    Kembalikan peta email + tanggal lahir per NAMA dan per NIK."""
+    from openpyxl.utils import get_column_letter  # noqa
+    by_nama, by_nik = {}, {}
+    for name in wb.sheetnames:
+        ws = wb[name]
+        header_row, cols = None, {}
+        for r in range(1, 13):
+            labels = {}
+            for c in range(1, 25):
+                v = ws.cell(r, c).value
+                if isinstance(v, str) and v.strip():
+                    labels[v.strip().lower()] = c
+            if "nama" in labels and "email" in labels:
+                header_row = r
+                cols = {
+                    "nama": labels.get("nama"),
+                    "email": labels.get("email"),
+                    "nik": labels.get("nik"),
+                    "lahir": next((labels[k] for k in labels if "lahir" in k), None),
+                }
+                break
+        if not header_row:
+            continue
+        for r in range(header_row + 1, min(ws.max_row, 1000) + 1):
+            nama = ws.cell(r, cols["nama"]).value if cols["nama"] else None
+            if not nama or not str(nama).strip():
+                continue
+            email = ws.cell(r, cols["email"]).value if cols["email"] else None
+            tgl = ws.cell(r, cols["lahir"]).value if cols.get("lahir") else None
+            nik = ws.cell(r, cols["nik"]).value if cols.get("nik") else None
+            rec = {
+                "email": str(email).strip() if email else "",
+                "tanggal_lahir": _norm_date(tgl),
+                "nik": str(nik).strip() if nik else "",
+            }
+            by_nama[str(nama).strip().lower()] = rec
+            if rec["nik"]:
+                by_nik[rec["nik"].lower()] = rec
+    return by_nama, by_nik
+
+
 def _parse_slip_sheet(ws, month, year):
     """Parse satu sheet slip (format cetak MKS) menjadi dict slip.
     Layout tetap: header di A1-A3, SLIP GAJI di A5, info di baris 8-10,
@@ -715,6 +758,8 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
     emps = await db.hrd_employees.find(NOT_DELETED_FILTER, {"_id": 0}).to_list(2000)
     by_nik = {(e.get("nik") or "").strip().lower(): e for e in emps if e.get("nik")}
     by_nama = {(e.get("nama") or "").strip().lower(): e for e in emps if e.get("nama")}
+    # Baca tabel direktori (sheet 'Daftar Gaji') untuk email + tanggal lahir
+    dir_by_nama, dir_by_nik = _parse_directory(wb)
 
     created = 0
     updated = 0
@@ -728,6 +773,7 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
         if not match:
             match = by_nama.get(slip["nama"].strip().lower())
         sheet_email = (slip.pop("email_sheet", "") or "").strip()
+        tgl_sheet = (slip.get("tanggal_lahir") or "").strip()  # dari sheet slip (jika ada)
         slip["email"] = ""
         slip["bank"] = ""
         slip["no_rekening"] = ""
@@ -738,6 +784,16 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
             slip["no_rekening"] = match.get("no_rekening", "")
             if not slip.get("jabatan") and match.get("jabatan"):
                 slip["jabatan"] = match["jabatan"]
+        # Tabel direktori 'Daftar Gaji' (cocokkan by NIK lalu by NAMA)
+        drec = dir_by_nik.get((slip.get("nik") or "").strip().lower()) or dir_by_nama.get(slip["nama"].strip().lower())
+        if drec and drec.get("email"):
+            slip["email"] = drec["email"]
+        # Tanggal lahir: prioritas sheet slip > tabel direktori
+        if tgl_sheet:
+            slip["tanggal_lahir"] = tgl_sheet
+        elif drec and drec.get("tanggal_lahir"):
+            slip["tanggal_lahir"] = drec["tanggal_lahir"]
+        # Email dari sheet slip paling spesifik (override)
         if sheet_email:
             slip["email"] = sheet_email
         # Upsert berdasarkan (period + nama) agar re-import menimpa, bukan dobel

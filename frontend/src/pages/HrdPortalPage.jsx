@@ -95,8 +95,7 @@ export default function HrdPortalPage() {
 
   const openGaji = () => {
     if (gajiToken) { setSection("gaji"); return; }
-    // Reset sudah disetujui → langsung buat PIN baru (tanpa PIN lama)
-    if (meta.can_manage_gaji_pin && meta.gaji_reset_approved) { setResetApplyOpen(true); return; }
+    // Selalu ke input PIN biasa. Reset PIN hanya lewat tombol khusus di header (bila lupa).
     setGajiPinMode(meta.gaji_pin_set ? "verify" : "create");
   };
 

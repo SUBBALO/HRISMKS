@@ -2,7 +2,6 @@
 Portal dikunci PIN — bahkan admin harus masukkan PIN untuk melihat data gaji."""
 import io
 import uuid
-from pathlib import Path
 import smtplib
 import ssl
 from datetime import datetime, timezone, timedelta
@@ -878,7 +877,6 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
 
 
 # ---------------- PDF slip ----------------
-KOP_SURAT_PATH = Path(__file__).resolve().parent.parent / "assets" / "kop_surat.pdf"
 
 
 def _rp(v):
@@ -939,22 +937,19 @@ def _terbilang_rupiah(n) -> str:
     return " ".join(w.capitalize() for w in words.split()) + " Rupiah"
 
 
-def _merge_with_kop(content_buf: io.BytesIO) -> io.BytesIO:
-    """Overlay konten slip di atas kop surat resmi perusahaan (vektor, tetap tajam)."""
-    if not KOP_SURAT_PATH.exists():
-        content_buf.seek(0)
-        return content_buf
-    from pypdf import PdfReader, PdfWriter
-    content = PdfReader(content_buf)
-    writer = PdfWriter()
-    for cp in content.pages:
-        bg = PdfReader(str(KOP_SURAT_PATH)).pages[0]
-        bg.merge_page(cp)
-        writer.add_page(bg)
-    out = io.BytesIO()
-    writer.write(out)
-    out.seek(0)
-    return out
+def _watermark(canvas, doc):
+    """Watermark diagonal anti-penyalahgunaan: halaman tidak bisa dipakai ulang sebagai kertas kosong."""
+    from reportlab.lib.pagesizes import A4
+    canvas.saveState()
+    w, h = A4
+    canvas.setFont("Helvetica-Bold", 42)
+    canvas.setFillColorRGB(0.55, 0.60, 0.67, alpha=0.08)
+    canvas.translate(w / 2, h / 2)
+    canvas.rotate(45)
+    canvas.drawCentredString(0, 80, "SLIP GAJI • RAHASIA")
+    canvas.drawCentredString(0, -40, "PT. MITRA KARYA SARANA")
+    canvas.drawCentredString(0, -160, "SLIP GAJI • RAHASIA")
+    canvas.restoreState()
 
 
 def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
@@ -965,7 +960,7 @@ def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
     buf = io.BytesIO()
-    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=44 * mm, bottomMargin=16 * mm,
+    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=16 * mm, bottomMargin=14 * mm,
                             leftMargin=16 * mm, rightMargin=16 * mm)
     styles = getSampleStyleSheet()
     small = ParagraphStyle("s", parent=styles["Normal"], fontSize=9)
@@ -978,6 +973,22 @@ def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
     ORANGE_BG = colors.HexColor("#FFF7ED")
     ORANGE = colors.HexColor("#C2410C")
     CW = 178 * mm  # lebar konten total
+
+    # Header teks polos (tanpa logo/kop — aman dari penyalahgunaan)
+    head = Table([
+        [Paragraph("PT. MITRA KARYA SARANA",
+                   ParagraphStyle("hc", parent=styles["Normal"], fontSize=12, alignment=1,
+                                  fontName="Helvetica-Bold", textColor=DARK))],
+        [Paragraph("Dokumen Internal Penggajian — bukan kop surat resmi perusahaan",
+                   ParagraphStyle("hs", parent=styles["Normal"], fontSize=7.5, alignment=1,
+                                  textColor=colors.HexColor("#64748B")))],
+    ], colWidths=[CW])
+    head.setStyle(TableStyle([
+        ("LINEBELOW", (0, 1), (0, 1), 0.8, DARK),
+        ("BOTTOMPADDING", (0, 0), (0, 0), 1), ("BOTTOMPADDING", (0, 1), (0, 1), 5),
+    ]))
+    elems.append(head)
+    elems.append(Spacer(1, 8))
 
     # Judul: band gelap "SLIP GAJI" + baris periode
     per = f"{BULAN_ID.get(slip.get('period_month'), slip.get('period_month'))} {slip.get('period_year')}"
@@ -1117,9 +1128,9 @@ def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
         elems.append(Spacer(1, 5))
         elems.append(Paragraph(f"Dicetak oleh: {printed_by}",
                                ParagraphStyle("f", parent=tiny, fontSize=7, textColor=colors.grey)))
-    pdf.build(elems)
+    pdf.build(elems, onFirstPage=_watermark, onLaterPages=_watermark)
     buf.seek(0)
-    return _merge_with_kop(buf)
+    return buf
 
 
 @router.get("/payslips/{sid}/pdf")

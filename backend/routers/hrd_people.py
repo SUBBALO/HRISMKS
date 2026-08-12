@@ -10,7 +10,7 @@ from pathlib import Path
 
 import qrcode
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
 from db import db
@@ -114,6 +114,45 @@ async def delete_person(emp_id: str, current: dict = Depends(require_hrd_perm("h
         raise HTTPException(status_code=404, detail="Karyawan tidak ditemukan")
     await log_action(current, "hrd_person_delete", "hrd_employees", emp_id, {})
     return {"success": True}
+
+
+# ---------------- Foto profil karyawan ----------------
+PHOTO_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+PHOTO_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+
+@router.post("/people/{emp_id}/photo")
+async def upload_photo(emp_id: str, file: UploadFile = File(...),
+                       current: dict = Depends(require_hrd_perm("hrd_dokumen", "edit"))):
+    emp = await db.hrd_employees.find_one({"id": emp_id, **NOT_DELETED_FILTER}, {"_id": 0})
+    if not emp:
+        raise HTTPException(status_code=404, detail="Karyawan tidak ditemukan")
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in PHOTO_EXT:
+        raise HTTPException(status_code=400, detail="Foto harus JPG/PNG/WEBP")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Ukuran foto maksimal 5 MB")
+    folder = UPLOAD_DIR / emp_id
+    folder.mkdir(parents=True, exist_ok=True)
+    for old in folder.glob("photo.*"):
+        old.unlink(missing_ok=True)
+    (folder / f"photo{ext}").write_bytes(data)
+    ver = uuid.uuid4().hex[:8]
+    await db.hrd_employees.update_one({"id": emp_id}, {"$set": {"photo_ext": ext, "photo_ver": ver, "updated_at": _now()}})
+    await log_action(current, "hrd_photo_upload", "hrd_employees", emp_id, {"nama": emp.get("nama")})
+    return {"success": True, "photo_ext": ext, "photo_ver": ver}
+
+
+@router.get("/people/{emp_id}/photo")
+async def get_photo(emp_id: str, current: dict = Depends(require_hrd_perm("hrd_dokumen", "view"))):
+    emp = await db.hrd_employees.find_one({"id": emp_id, **NOT_DELETED_FILTER}, {"_id": 0})
+    if not emp or not emp.get("photo_ext"):
+        raise HTTPException(status_code=404, detail="Foto tidak ada")
+    path = UPLOAD_DIR / emp_id / f"photo{emp['photo_ext']}"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File foto tidak ditemukan")
+    return FileResponse(str(path), media_type=PHOTO_MIME.get(emp["photo_ext"], "image/jpeg"))
 
 
 # ---------------- Dokumen karyawan (upload/list/download/hapus) ----------------

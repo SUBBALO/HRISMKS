@@ -1,15 +1,17 @@
 """Modul HRD tambahan: Dashboard, Cuti & Izin, Absensi, Penilaian Kinerja,
 Pengumuman, Riwayat Karir. Permission: hrd_dokumen (non-payroll)."""
+import io
 import uuid
 from datetime import datetime, timezone, date
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from db import db
 from deps import log_action
 from services.soft_delete import NOT_DELETED_FILTER, soft_delete_one
-from routers.hrd import require_hrd_perm, require_hrd, _now
+from routers.hrd import require_hrd_perm, require_hrd, _now, BULAN_ID
 
 router = APIRouter(prefix="/hrd", tags=["hrd-extras"])
 
@@ -95,9 +97,7 @@ class LeaveIn(BaseModel):
     keterangan: str = ""
 
 
-@router.get("/leaves")
-async def list_leaves(year: int = 0, current: dict = Depends(require_hrd_perm("hrd_dokumen", "view"))):
-    year = year or datetime.now(timezone.utc).year
+async def _leaves_data(year: int):
     items = await db.hrd_leaves.find(
         {**NOT_DELETED_FILTER, "tanggal_mulai": {"$regex": f"^{year}"}}, {"_id": 0}
     ).sort("tanggal_mulai", -1).to_list(2000)
@@ -109,6 +109,13 @@ async def list_leaves(year: int = 0, current: dict = Depends(require_hrd_perm("h
     balances = [{"employee_id": e["id"], "nama": e.get("nama"), "quota": CUTI_QUOTA,
                  "terpakai": used.get(e["id"], 0), "sisa": CUTI_QUOTA - used.get(e["id"], 0)} for e in emps]
     balances.sort(key=lambda x: (x["nama"] or ""))
+    return items, balances
+
+
+@router.get("/leaves")
+async def list_leaves(year: int = 0, current: dict = Depends(require_hrd_perm("hrd_dokumen", "view"))):
+    year = year or datetime.now(timezone.utc).year
+    items, balances = await _leaves_data(year)
     return {"items": items, "balances": balances, "year": year, "quota": CUTI_QUOTA}
 
 
@@ -148,8 +155,7 @@ class AttendanceIn(BaseModel):
     cuti: float = 0
 
 
-@router.get("/attendance")
-async def list_attendance(year: int, month: int, current: dict = Depends(require_hrd_perm("hrd_dokumen", "view"))):
+async def _attendance_rows(year: int, month: int):
     items = await db.hrd_attendance.find(
         {**NOT_DELETED_FILTER, "year": year, "month": month}, {"_id": 0}).to_list(2000)
     by_emp = {i["employee_id"]: i for i in items}
@@ -160,6 +166,12 @@ async def list_attendance(year: int, month: int, current: dict = Depends(require
         a = by_emp.get(e["id"], {})
         rows.append({"employee_id": e["id"], "nama": e.get("nama"), "dept": e.get("dept"), "jabatan": e.get("jabatan"),
                      **{k: a.get(k, 0) for k in ["hadir", "terlambat", "absen", "izin", "sakit", "cuti"]}})
+    return rows
+
+
+@router.get("/attendance")
+async def list_attendance(year: int, month: int, current: dict = Depends(require_hrd_perm("hrd_dokumen", "view"))):
+    rows = await _attendance_rows(year, month)
     return {"items": rows, "year": year, "month": month}
 
 
@@ -175,6 +187,77 @@ async def save_attendance(payload: AttendanceIn, current: dict = Depends(require
         {"employee_id": payload.employee_id, "year": payload.year, "month": payload.month, **NOT_DELETED_FILTER},
         {"$set": data, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": _now()}}, upsert=True)
     return {"success": True}
+
+
+# ---------------- Export Excel ----------------
+def _xlsx_sheet(ws, title, headers, rows, widths):
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    thin = Border(*[Side(style="thin", color="CBD5E1")] * 4)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+    c = ws.cell(row=1, column=1, value=title)
+    c.font = Font(bold=True, size=13, color="1E293B")
+    c.alignment = Alignment(horizontal="center")
+    for j, h in enumerate(headers, 1):
+        cell = ws.cell(row=3, column=j, value=h)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="334155")
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = thin
+    for i, row in enumerate(rows, 4):
+        for j, v in enumerate(row, 1):
+            cell = ws.cell(row=i, column=j, value=v)
+            cell.border = thin
+    for j, w in enumerate(widths, 1):
+        ws.column_dimensions[ws.cell(row=3, column=j).column_letter].width = w
+
+
+def _xlsx_response(wb, filename):
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/attendance/export")
+async def export_attendance(year: int, month: int, current: dict = Depends(require_hrd_perm("hrd_dokumen", "view"))):
+    from openpyxl import Workbook
+    rows = await _attendance_rows(year, month)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Rekap Absensi"
+    _xlsx_sheet(ws, f"REKAP ABSENSI — {BULAN_ID.get(month, month)} {year} — PT. MITRA KARYA SARANA",
+                ["No", "Nama", "Departemen", "Jabatan", "Hadir", "Terlambat", "Absen", "Izin", "Sakit", "Cuti"],
+                [[i + 1, r["nama"], r["dept"] or "-", r["jabatan"] or "-",
+                  r["hadir"], r["terlambat"], r["absen"], r["izin"], r["sakit"], r["cuti"]]
+                 for i, r in enumerate(rows)],
+                [5, 28, 16, 20, 9, 11, 9, 9, 9, 9])
+    await log_action(current, "hrd_attendance_export", "hrd_attendance", f"{year}-{month}", {})
+    return _xlsx_response(wb, f"Rekap_Absensi_{month:02d}_{year}.xlsx")
+
+
+@router.get("/leaves/export")
+async def export_leaves(year: int = 0, current: dict = Depends(require_hrd_perm("hrd_dokumen", "view"))):
+    from openpyxl import Workbook
+    year = year or datetime.now(timezone.utc).year
+    items, balances = await _leaves_data(year)
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "Riwayat Cuti"
+    _xlsx_sheet(ws1, f"RIWAYAT CUTI & IZIN {year} — PT. MITRA KARYA SARANA",
+                ["No", "Nama", "Jenis", "Mulai", "Selesai", "Jml Hari", "Keterangan", "Dicatat Oleh"],
+                [[i + 1, it.get("nama"), it.get("jenis"), it.get("tanggal_mulai"), it.get("tanggal_selesai"),
+                  it.get("jumlah_hari"), it.get("keterangan") or "-", it.get("created_by")]
+                 for i, it in enumerate(items)],
+                [5, 28, 14, 13, 13, 10, 30, 16])
+    ws2 = wb.create_sheet("Saldo Cuti")
+    _xlsx_sheet(ws2, f"SALDO CUTI TAHUNAN {year} (Kuota {CUTI_QUOTA} hari)",
+                ["No", "Nama", "Kuota", "Terpakai", "Sisa"],
+                [[i + 1, b["nama"], b["quota"], b["terpakai"], b["sisa"]] for i, b in enumerate(balances)],
+                [5, 28, 9, 10, 9])
+    await log_action(current, "hrd_leaves_export", "hrd_leaves", str(year), {})
+    return _xlsx_response(wb, f"Rekap_Cuti_{year}.xlsx")
 
 
 # ---------------- Penilaian Kinerja ----------------

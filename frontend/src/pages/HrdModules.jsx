@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import api, { formatDateID, formatApiErrorDetail } from "../lib/api";
+import api, { formatDateID, formatApiErrorDetail, downloadXlsx } from "../lib/api";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -9,7 +9,8 @@ import { Badge } from "../components/ui/badge";
 import { Textarea } from "../components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Trash, Plus, Megaphone, Star, CalendarBlank, PencilSimple, Buildings } from "@phosphor-icons/react";
+import { Trash, Plus, Megaphone, Star, CalendarBlank, PencilSimple, Buildings, FileXls } from "@phosphor-icons/react";
+import { Avatar } from "./HrdDokumen";
 
 const errMsg = (e) => formatApiErrorDetail(e?.response?.data?.detail) || e?.message || "Terjadi kesalahan";
 const BULAN = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -80,10 +81,17 @@ export function CutiSection({ can }) {
     <div data-testid="hrd-cuti">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div className="text-sm text-slate-500">Kuota cuti tahunan: <b>{data.quota} hari</b> / karyawan</div>
-        <Select value={String(year)} onValueChange={(v) => setYear(parseInt(v))}>
-          <SelectTrigger className="w-28" data-testid="cuti-year"><SelectValue /></SelectTrigger>
-          <SelectContent>{[0, 1, 2].map((i) => { const y = new Date().getFullYear() - i; return <SelectItem key={y} value={String(y)}>{y}</SelectItem>; })}</SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <Select value={String(year)} onValueChange={(v) => setYear(parseInt(v))}>
+            <SelectTrigger className="w-28" data-testid="cuti-year"><SelectValue /></SelectTrigger>
+            <SelectContent>{[0, 1, 2].map((i) => { const y = new Date().getFullYear() - i; return <SelectItem key={y} value={String(y)}>{y}</SelectItem>; })}</SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" className="gap-1.5 text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+            onClick={() => downloadXlsx("/hrd/leaves/export", { year }, `Rekap_Cuti_${year}.xlsx`).then(() => toast.success("Excel terunduh")).catch((e) => toast.error(e.message))}
+            data-testid="cuti-export">
+            <FileXls size={15} weight="fill" /> Export Excel
+          </Button>
+        </div>
       </div>
 
       {can?.create && (
@@ -212,11 +220,18 @@ export function AbsensiSection({ can }) {
             <SelectContent>{[0, 1, 2].map((i) => { const y = now.getFullYear() - i; return <SelectItem key={y} value={String(y)}>{y}</SelectItem>; })}</SelectContent>
           </Select>
         </div>
-        {can?.edit && (
-          <Button size="sm" className="bg-rose-600 hover:bg-rose-700" onClick={saveAll} disabled={busy || !Object.keys(dirty).length} data-testid="abs-save">
-            {busy ? "Menyimpan…" : `Simpan Rekap${Object.keys(dirty).length ? ` (${Object.keys(dirty).length})` : ""}`}
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5 text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+            onClick={() => downloadXlsx("/hrd/attendance/export", { year, month }, `Rekap_Absensi_${String(month).padStart(2, "0")}_${year}.xlsx`).then(() => toast.success("Excel terunduh")).catch((e) => toast.error(e.message))}
+            data-testid="abs-export">
+            <FileXls size={15} weight="fill" /> Export Excel
           </Button>
-        )}
+          {can?.edit && (
+            <Button size="sm" className="bg-rose-600 hover:bg-rose-700" onClick={saveAll} disabled={busy || !Object.keys(dirty).length} data-testid="abs-save">
+              {busy ? "Menyimpan…" : `Simpan Rekap${Object.keys(dirty).length ? ` (${Object.keys(dirty).length})` : ""}`}
+            </Button>
+          )}
+        </div>
       </div>
       <Card className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -359,9 +374,7 @@ export function OrgSection() {
               <div className="space-y-1.5">
                 {emps.map((p) => (
                   <div key={p.id} className="flex items-center gap-2.5 border border-slate-100 rounded-md px-2.5 py-1.5">
-                    <div className="h-7 w-7 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center text-[10px] font-bold shrink-0">
-                      {(p.nama || "?").split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase()}
-                    </div>
+                    <Avatar p={p} className="h-7 w-7 text-[10px]" />
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-slate-800 truncate">{p.nama}</div>
                       <div className="text-[10px] text-slate-400">{p.jabatan || "-"}</div>

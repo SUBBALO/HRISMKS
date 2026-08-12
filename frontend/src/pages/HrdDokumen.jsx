@@ -15,10 +15,22 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import {
   UsersThree, Plus, Trash, PencilSimple, FilePdf, MagnifyingGlass, Files, UploadSimple,
-  DownloadSimple, SealCheck, XCircle, FileText, QrCode, ArrowLeft, CaretRight, Eye,
+  DownloadSimple, SealCheck, XCircle, FileText, QrCode, ArrowLeft, CaretRight, Eye, Camera,
 } from "@phosphor-icons/react";
 
 const errMsg = (e) => formatApiErrorDetail(e?.response?.data?.detail) || e?.message || "Terjadi kesalahan";
+
+const photoUrl = (p) => p?.photo_ext ? `${process.env.REACT_APP_BACKEND_URL}/api/hrd/people/${p.id}/photo?v=${p.photo_ver || ""}` : null;
+
+export function Avatar({ p, className = "h-8 w-8 text-[10px]" }) {
+  const url = photoUrl(p);
+  const initials = (p?.nama || "?").split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  return url ? (
+    <img src={url} alt={p.nama} className={`${className} rounded-full object-cover border border-slate-200 shrink-0`} />
+  ) : (
+    <div className={`${className} rounded-full bg-rose-100 text-rose-700 flex items-center justify-center font-bold shrink-0`}>{initials}</div>
+  );
+}
 
 /* ============================ Hub (per kartu) ============================ */
 const MODULES = [
@@ -147,7 +159,12 @@ function PeopleSection({ can }) {
               : items.length === 0 ? (<tr><td colSpan={8} className="text-center py-10 text-slate-400">Belum ada karyawan. Klik "Tambah Karyawan".</td></tr>)
                 : items.map((p) => (
                   <tr key={p.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setDetail(p)} data-testid={`people-row-${p.id}`}>
-                    <td className="px-4 py-2.5 font-medium text-slate-800">{p.nama}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <Avatar p={p} />
+                        <span className="font-medium text-slate-800">{p.nama}</span>
+                      </div>
+                    </td>
                     <td className="px-4 py-2.5 text-slate-600">{p.nik || "-"}</td>
                     <td className="px-4 py-2.5 text-slate-600">{p.jabatan || "-"}</td>
                     <td className="px-4 py-2.5 text-slate-600">{p.dept || "-"}</td>
@@ -288,15 +305,36 @@ function DSection({ title, children }) {
 }
 
 function PersonDetailDialog({ person, docTypes, can, onClose, onEdit }) {
+  const [photo, setPhoto] = useState({ ext: null, ver: null });
+  useEffect(() => { if (person) setPhoto({ ext: person.photo_ext, ver: person.photo_ver }); }, [person]);
   if (!person) return null;
   const p = person;
-  const initials = (p.nama || "?").split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+
+  const uploadPhoto = async (file) => {
+    if (!file) return;
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const r = await api.post(`/hrd/people/${p.id}/photo`, fd);
+      setPhoto({ ext: r.data.photo_ext, ver: r.data.photo_ver });
+      toast.success("Foto profil diperbarui");
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
   return (
     <Dialog open={!!person} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="person-detail-dialog">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center font-bold text-lg shrink-0">{initials}</div>
+            <div className="relative shrink-0">
+              <Avatar p={{ ...p, photo_ext: photo.ext, photo_ver: photo.ver }} className="h-14 w-14 text-lg" />
+              {can?.edit && (
+                <label className="absolute -bottom-1 -right-1 h-6 w-6 bg-slate-800 text-white rounded-full flex items-center justify-center cursor-pointer hover:bg-slate-700 border-2 border-white" title="Upload foto profil">
+                  <Camera size={12} weight="fill" />
+                  <input type="file" hidden accept=".jpg,.jpeg,.png,.webp"
+                    onChange={(e) => { uploadPhoto(e.target.files?.[0]); e.target.value = ""; }} data-testid="person-photo-input" />
+                </label>
+              )}
+            </div>
             <div className="flex-1 min-w-0">
               <DialogTitle className="truncate">{p.nama}</DialogTitle>
               <div className="flex items-center gap-2 mt-1 flex-wrap">

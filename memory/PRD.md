@@ -39,3 +39,9 @@ Extract ONLY the HRD module from an existing ERP (github.com/SUBBALO/PROCUREMENT
 
 ## Not Verified / Notes
 - Email blast requires real SMTP credentials configured in Pengaturan Email (Host/Port/Username/Password) — not set in demo, so actual sending not tested end-to-end. Recommended: Hostinger Business Email (smtp.hostinger.com, 465 SSL / 587 TLS). Using own domain avoids the Gmail SPF/DKIM 5.7.26 rejection.
+
+## 2026-08 (lanjutan): Data karyawan asli + Foto profil + Export Excel
+- IMPORT 5 KARYAWAN ASLI dari slip gaji ke hrd_employees (Wawan Munandar MKS0021 Supervisor, Harjono MKS0013 Leader, Rahmat Ari Sandi NST MKS0020 Milling Operator, Muhammad Edy Sofyan MKS0054 Leader, Sumanto MKS0100 Asst Supervisor). Terisi: nama/nik/jabatan/dept/email/tgl_lahir; kosong: tgl_masuk, status_karyawan (perlu dilengkapi user). Dummy 'Test Karyawan' soft-deleted.
+- FOTO PROFIL: POST/GET /api/hrd/people/{id}/photo (JPG/PNG/WEBP max 5MB, file photo.{ext} di uploads/employees/{id}/, cache-bust photo_ver). Avatar component (named export dari HrdDokumen.jsx) di tabel karyawan, detail popup (tombol kamera, testid person-photo-input), struktur organisasi.
+- EXPORT EXCEL: GET /api/hrd/attendance/export?year&month + GET /api/hrd/leaves/export?year (2 sheet Riwayat+Saldo), styled openpyxl. Tombol UI: cuti-export, abs-export (helper downloadXlsx di lib/api).
+- Self-tested: xlsx valid (curl+openpyxl), foto upload/get 200, screenshot UI (5 baris karyawan + avatar, popup detail + kamera, tombol export tampil). Foto test di Harjono sudah dibersihkan.

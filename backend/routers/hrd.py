@@ -979,8 +979,8 @@ def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
         [Paragraph("PT. MITRA KARYA SARANA",
                    ParagraphStyle("hc", parent=styles["Normal"], fontSize=12, alignment=1,
                                   fontName="Helvetica-Bold", textColor=DARK))],
-        [Paragraph("Dokumen Internal Penggajian — bukan kop surat resmi perusahaan",
-                   ParagraphStyle("hs", parent=styles["Normal"], fontSize=7.5, alignment=1,
+        [Paragraph("Taiwan International Park Blok B No. 117 - Kel. Kabil, Kec. Nongsa, Kota Batam, Kepulauan Riau",
+                   ParagraphStyle("hs", parent=styles["Normal"], fontSize=8, alignment=1,
                                   textColor=colors.HexColor("#64748B")))],
     ], colWidths=[CW])
     head.setStyle(TableStyle([

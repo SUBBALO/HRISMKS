@@ -346,9 +346,77 @@ function PersonDetailDialog({ person, docTypes, can, onClose, onEdit }) {
             <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800"><b>Catatan:</b> {p.catatan}</div>
           )}
           <DocsPanel person={p} docTypes={docTypes} can={can} />
+          <CareerPanel person={p} can={can} />
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ---------- Riwayat karir ---------- */
+function CareerPanel({ person, can }) {
+  const [items, setItems] = useState([]);
+  const [kinds, setKinds] = useState([]);
+  const [tanggal, setTanggal] = useState("");
+  const [jenis, setJenis] = useState("");
+  const [ket, setKet] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try { const r = await api.get(`/hrd/people/${person.id}/career`); setItems(r.data.items || []); setKinds(r.data.kinds || []); }
+    catch (e) { toast.error(errMsg(e)); }
+  }, [person.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const add = async () => {
+    if (!tanggal || !jenis) { toast.error("Isi tanggal & jenis"); return; }
+    setBusy(true);
+    try {
+      await api.post("/hrd/career", { employee_id: person.id, tanggal, jenis, keterangan: ket });
+      toast.success("Riwayat tercatat"); setTanggal(""); setJenis(""); setKet(""); load();
+    } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+  };
+  const del = async (id) => {
+    try { await api.delete(`/hrd/career/${id}`); toast.success("Dihapus"); load(); }
+    catch (e) { toast.error(errMsg(e)); }
+  };
+  const kindColor = (j) => j === "Promosi" ? "bg-emerald-100 text-emerald-700" : j === "Kenaikan Gaji" ? "bg-sky-100 text-sky-700"
+    : j === "Surat Peringatan" ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-600";
+
+  return (
+    <div data-testid="career-panel">
+      <div className="text-[11px] font-bold uppercase tracking-wider text-rose-600 border-b border-slate-200 pb-1 mb-2">
+        Riwayat Karir ({items.length})
+      </div>
+      {can?.create && (
+        <div className="flex items-end gap-2 flex-wrap bg-slate-50 border border-slate-200 rounded-md p-2.5 mb-3">
+          <div><Label className="text-[11px] text-slate-500">Tanggal</Label>
+            <Input type="date" className="h-8 text-xs w-36" value={tanggal} onChange={(e) => setTanggal(e.target.value)} data-testid="career-tanggal" /></div>
+          <div className="w-40"><Label className="text-[11px] text-slate-500">Jenis</Label>
+            <Select value={jenis} onValueChange={setJenis}>
+              <SelectTrigger className="h-8 text-xs" data-testid="career-jenis"><SelectValue placeholder="Pilih…" /></SelectTrigger>
+              <SelectContent>{kinds.map((k) => <SelectItem key={k} value={k}>{k}</SelectItem>)}</SelectContent>
+            </Select></div>
+          <div className="flex-1 min-w-40"><Label className="text-[11px] text-slate-500">Keterangan</Label>
+            <Input className="h-8 text-xs" value={ket} onChange={(e) => setKet(e.target.value)} placeholder="mis. naik jadi Leader" data-testid="career-ket" /></div>
+          <Button size="sm" className="h-8 bg-sky-600 hover:bg-sky-700 text-xs" onClick={add} disabled={busy} data-testid="career-add">{busy ? "…" : "Catat"}</Button>
+        </div>
+      )}
+      {items.length === 0 ? (
+        <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-md">Belum ada riwayat karir.</div>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map((c) => (
+            <div key={c.id} className="flex items-center gap-2.5 border border-slate-100 rounded-md px-3 py-2" data-testid={`career-row-${c.id}`}>
+              <Badge className={`${kindColor(c.jenis)} hover:bg-inherit text-[10px] shrink-0`}>{c.jenis}</Badge>
+              <div className="flex-1 min-w-0 text-xs text-slate-700 truncate">{c.keterangan || "-"}</div>
+              <div className="text-[10px] text-slate-400 shrink-0">{formatDateID(c.tanggal)}</div>
+              {can?.delete && <Trash size={14} className="text-rose-500 cursor-pointer shrink-0" onClick={() => del(c.id)} data-testid={`career-del-${c.id}`} />}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -1,0 +1,27 @@
+{
+  "summary": "Tested NEW HR modules (Dashboard, Reminder Kontrak, Cuti & Izin, Absensi rekap, Penilaian Kinerja, Struktur Organisasi, Pengumuman, Riwayat Karir) + sidebar UI overhaul. Backend pytest 18/18 pass on new /api/hrd/dashboard, /leaves, /attendance, /reviews, /announcements, /career endpoints. Access-control (401 unauth, susanto=200) verified. Frontend Playwright end-to-end pass on all 8 requested flows for user 'heri' (sidebar w/ 8 items, dashboard stat-cards + bar/pie charts + widgets; Cuti create-list-saldo-delete w/ auto-hari=3; Absensi upsert + persistence; Kinerja skor entry+rata+delete; Organisasi dept grouping; Pengumuman create with PENTING badge and dashboard banner; Riwayat Karir add/delete in person-detail-dialog). Regression 'herliana Gaji PIN 123456' PASSED — sidebar Gaji card present, PIN dialog opens, PIN 123456 unlocks Gaji area and slip list loads. Skor > 5 clamped to 5 verified. Attendance upsert (no duplicate) verified. Announcements viewable by super (susanto).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_hrd_extras.py",
+    "/app/test_reports/pytest/hrd_extras.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "hrd_extras.py list_leaves uses `tanggal_mulai: {$regex: ^{year}}` — works because dates stored as ISO strings, but a proper index on this field would be $gte/$lt range and is more efficient at scale.",
+    "attendance upsert filter does not include NOT_DELETED_FILTER; a previously soft-deleted attendance row with same (employee_id, year, month) would be silently re-hydrated by $set instead of a new record — low probability edge case but worth aligning with other collections.",
+    "reviews `rata` calculation ignores zero-scored criteria (only averages `filled = v for v in skor.values() if v`) — if a user genuinely enters 0 as a bad score it's treated as 'not filled'. UI already enforces min=1 so acceptable, but doc it or drop the filter.",
+    "announcements GET uses require_hrd (any hrd user incl. gaji-only), while POST/PUT/DELETE require hrd_dokumen — consistent with product intent (read wide, write narrow).",
+    "HrdDashboard.jsx fetches /announcements even if user has no hrd_dokumen perm; endpoint permits it (require_hrd) so no error, but for a purely gaji-only user this would show announcements they may not manage — feature not a bug."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_hrd_extras.py"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "100% (all 8 flows + regression + access control)"},
+  "test_credentials": "heri/123456, herliana/123456, susanto/Subbalo1994 — all validated. Gaji PIN 123456 preserved (regression PASSED).",
+  "seed_data_creation": "Ephemeral TEST_ leaves/reviews/announcements/career entries created during run — all cleaned up via DELETE endpoints. One attendance row for the dev-seeded 'Test Karyawan' (Jan 2026, hadir=20) remains — this is an upsert record used by the persistence check; harmless.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file /app/backend/tests/test_hrd_extras.py (18 tests) covers all hrd_extras endpoints + access control + Gaji PIN regression. Run: pytest backend/tests/test_hrd_extras.py -o addopts='' -v. Frontend login inputs have NO name attribute — use `page.query_selector_all('input')` and index [0]/[1] for username/password (not name selectors). Data-testids on new modules match spec exactly. Dev seed: 1 employee 'Test Karyawan' (id 97dda254-215e-4521-8a62-87565612ff5c) in dept 'Production', 1 KTP doc, 1 SKK/2026/08/0001 letter, ~10 payslips for herliana (default month view may show 0-5 depending on system date — use month/year picker to browse). PIN 123456 unchanged. iteration_7's PersonDialog null-guard fix preserved.",
+  "rca of the issue": "N/A — no bugs found. All new features work as specified."
+}

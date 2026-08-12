@@ -18,11 +18,13 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Checkbox } from "../components/ui/checkbox";
 import DokumenHub from "./HrdDokumen";
+import DashboardSection from "./HrdDashboard";
+import { CutiSection, AbsensiSection, KinerjaSection, OrgSection, PengumumanSection } from "./HrdModules";
 import {
   UsersThree, Receipt, EnvelopeSimple, Gear, ClockCounterClockwise, Lock, LockKey,
   ArrowLeft, Plus, Trash, PencilSimple, FilePdf, DownloadSimple, UploadSimple,
   ShieldCheck, PaperPlaneTilt, MagnifyingGlass, WarningCircle, CheckCircle, XCircle,
-  FolderSimple, Key, Money,
+  FolderSimple, Key, Money, SquaresFour, CalendarBlank, Timer, Star, Buildings, Megaphone,
 } from "@phosphor-icons/react";
 
 const BULAN = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -93,6 +95,8 @@ export default function HrdPortalPage() {
 
   const access = meta.access || {};
   const hasGajiAccess = (meta.gaji_group || []).some((k) => access[k] && access[k].view);
+  const showDokumen = meta.is_super || (access.hrd_dokumen && access.hrd_dokumen.view);
+  const dokCan = meta.is_super ? ALL : (access.hrd_dokumen || {});
 
   const openGaji = () => {
     if (gajiToken) { setSection("gaji"); return; }
@@ -100,11 +104,46 @@ export default function HrdPortalPage() {
     setGajiPinMode(meta.gaji_pin_set ? "verify" : "create");
   };
 
+  const NAV = [
+    { key: "home", label: "Beranda", icon: SquaresFour, testid: "hrd-nav-beranda" },
+    ...(hasGajiAccess ? [{ key: "gaji", label: "Data Gaji", icon: Money, lock: true, testid: "hrd-card-gaji" }] : []),
+    ...(showDokumen ? [
+      { key: "dokumen", label: "Dokumen HRD", icon: FolderSimple, testid: "hrd-card-dokumen" },
+      { key: "cuti", label: "Cuti & Izin", icon: CalendarBlank, testid: "hrd-nav-cuti" },
+      { key: "absensi", label: "Absensi", icon: Timer, testid: "hrd-nav-absensi" },
+      { key: "kinerja", label: "Kinerja", icon: Star, testid: "hrd-nav-kinerja" },
+      { key: "org", label: "Organisasi", icon: Buildings, testid: "hrd-nav-org" },
+      { key: "pengumuman", label: "Pengumuman", icon: Megaphone, testid: "hrd-nav-pengumuman" },
+    ] : []),
+    { key: "logs", label: "Log Akses", icon: ClockCounterClockwise, testid: "hrd-card-logs" },
+  ];
+  const SECTION_TITLES = {
+    home: "Beranda", gaji: "", dokumen: "", cuti: "Cuti & Izin", absensi: "Absensi & Rekap",
+    kinerja: "Penilaian Kinerja", org: "Struktur Organisasi", pengumuman: "Pengumuman Internal", logs: "",
+  };
+
+  const navBtn = (n, horizontal = false) => {
+    const isActive = section === n.key;
+    return (
+      <button key={n.key} data-testid={n.testid}
+        onClick={() => (n.key === "gaji" ? openGaji() : setSection(n.key))}
+        className={`flex items-center gap-2.5 rounded-md text-sm transition-all duration-150 ${horizontal
+          ? `px-3 py-2 shrink-0 ${isActive ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`
+          : `w-full px-3 py-2.5 text-left ${isActive ? "bg-slate-800 text-white font-semibold shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}`}>
+        <n.icon size={17} weight={isActive ? "fill" : "duotone"} className={isActive ? "" : "text-slate-400"} />
+        <span className="flex-1 truncate">{n.label}</span>
+        {n.lock && (gajiToken
+          ? <CheckCircle size={13} weight="fill" className="text-emerald-400" />
+          : <LockKey size={13} weight="fill" className={isActive ? "text-white/70" : "text-emerald-500"} />)}
+      </button>
+    );
+  };
+
   return (
     <div className="min-h-[calc(100vh-60px)] bg-slate-50 text-slate-900">
-      <div className="max-w-[1400px] mx-auto px-6 py-6">
+      <div className="max-w-[1500px] mx-auto px-4 md:px-6 py-5">
         {/* Header */}
-        <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <span className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-md p-0.5 shrink-0">
               <img src="/logo-mks.png" alt="MKS" className="w-full h-full object-contain" />
@@ -128,11 +167,6 @@ export default function HrdPortalPage() {
                 <Key size={15} weight="fill" /> Buat PIN Gaji Baru
               </Button>
             )}
-            {section !== "home" && (
-              <Button variant="outline" size="sm" onClick={() => setSection("home")} data-testid="hrd-nav-home" className="gap-1.5">
-                <ArrowLeft size={15} weight="bold" /> Menu HRD
-              </Button>
-            )}
             {meta.can_manage_gaji_pin && meta.gaji_pin_set && (
               <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setChangePinOpen(true)} data-testid="hrd-change-gajipin">
                 <LockKey size={15} weight="bold" /> Ubah PIN Gaji
@@ -142,10 +176,37 @@ export default function HrdPortalPage() {
           </div>
         </div>
 
-        {section === "home" && <HrdHome access={access} isSuper={meta.is_super} hasGajiAccess={hasGajiAccess} gajiPinSet={meta.gaji_pin_set} gajiUnlocked={!!gajiToken} onOpenGaji={openGaji} onOpen={setSection} />}
-        {section === "gaji" && <GajiArea hapi={hapi} can={ALL} onGoTab={() => {}} />}
-        {section === "dokumen" && <DokumenHub can={meta.is_super ? ALL : (access.hrd_dokumen || {})} />}
-        {section === "logs" && <LogsSection hapi={hapi} />}
+        <div className="flex gap-5 items-start">
+          {/* Sidebar (desktop) */}
+          <aside className="hidden md:block w-52 shrink-0 sticky top-4" data-testid="hrd-sidebar">
+            <div className="bg-white border border-slate-200 rounded-lg p-2 space-y-0.5">
+              {NAV.map((n) => navBtn(n))}
+            </div>
+          </aside>
+
+          {/* Konten */}
+          <main className="flex-1 min-w-0">
+            {/* Nav mobile */}
+            <div className="md:hidden flex gap-1.5 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
+              {NAV.map((n) => navBtn(n, true))}
+            </div>
+
+            {SECTION_TITLES[section] && (
+              <h2 className="text-lg font-bold text-slate-800 mb-4" style={{ fontFamily: "Chivo, sans-serif" }}>{SECTION_TITLES[section]}</h2>
+            )}
+            {section === "home" && (showDokumen ? <DashboardSection /> : (
+              <Card className="p-8 text-center text-sm text-slate-500">Selamat datang di Portal HRD. Gunakan menu di samping untuk membuka modul.</Card>
+            ))}
+            {section === "gaji" && <GajiArea hapi={hapi} can={ALL} onGoTab={() => {}} />}
+            {section === "dokumen" && <DokumenHub can={dokCan} />}
+            {section === "cuti" && <CutiSection can={dokCan} />}
+            {section === "absensi" && <AbsensiSection can={dokCan} />}
+            {section === "kinerja" && <KinerjaSection can={dokCan} />}
+            {section === "org" && <OrgSection />}
+            {section === "pengumuman" && <PengumumanSection can={dokCan} />}
+            {section === "logs" && <LogsSection hapi={hapi} />}
+          </main>
+        </div>
       </div>
 
       {/* Gaji PIN dialog (create/verify) */}
@@ -184,43 +245,6 @@ export default function HrdPortalPage() {
           setResetApplyOpen(false); setGajiToken(""); await loadMeta();
           toast.success("PIN Gaji baru berhasil dibuat");
         }} />
-    </div>
-  );
-}
-
-/* ============================ Home (cards) ============================ */
-function HrdHome({ access, isSuper, hasGajiAccess, gajiPinSet, gajiUnlocked, onOpenGaji, onOpen }) {
-  const showDokumen = isSuper || (access.hrd_dokumen && access.hrd_dokumen.view);
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="hrd-home">
-      {hasGajiAccess && (
-        <button onClick={onOpenGaji} data-testid="hrd-card-gaji"
-          className="group relative text-left bg-white border border-emerald-200 rounded-lg p-5 hover:border-emerald-400 hover:shadow-md transition-all duration-200">
-          <span className="absolute top-3 right-3 text-emerald-500" title={gajiUnlocked ? "Terbuka" : "Terkunci PIN Gaji"}>
-            {gajiUnlocked ? <CheckCircle size={16} weight="fill" /> : <LockKey size={16} weight="fill" />}
-          </span>
-          <span className="w-11 h-11 flex items-center justify-center bg-emerald-50 border border-emerald-200 rounded-md mb-3">
-            <Money size={22} weight="duotone" className="text-emerald-600" />
-          </span>
-          <div className="text-base font-bold text-slate-800" style={{ fontFamily: "Chivo, sans-serif" }}>Data Gaji</div>
-          <div className="text-xs text-slate-500 mt-1 leading-relaxed">Slip gaji, kirim email slip, & pengaturan email. Area khusus terkunci PIN Gaji.</div>
-          {!gajiPinSet && <Badge className="mt-3 bg-amber-100 text-amber-700 hover:bg-amber-100">PIN belum dibuat</Badge>}
-        </button>
-      )}
-      {showDokumen && (
-        <button onClick={() => onOpen("dokumen")} data-testid="hrd-card-dokumen"
-          className="group relative text-left bg-white border border-slate-200 rounded-lg p-5 hover:border-slate-400 hover:shadow-md transition-all duration-200">
-          <span className="w-11 h-11 flex items-center justify-center bg-rose-50 border border-rose-200 rounded-md mb-3"><FolderSimple size={22} weight="duotone" className="text-rose-600" /></span>
-          <div className="text-base font-bold text-slate-800" style={{ fontFamily: "Chivo, sans-serif" }}>Dokumen HRD</div>
-          <div className="text-xs text-slate-500 mt-1 leading-relaxed">Database karyawan, arsip dokumen (KTP, ijazah, dll), & cetak surat kerja ber-QR.</div>
-        </button>
-      )}
-      <button onClick={() => onOpen("logs")} data-testid="hrd-card-logs"
-        className="group relative text-left bg-white border border-slate-200 rounded-lg p-5 hover:border-slate-400 hover:shadow-md transition-all duration-200">
-        <span className="w-11 h-11 flex items-center justify-center bg-slate-100 border border-slate-200 rounded-md mb-3"><ClockCounterClockwise size={22} weight="duotone" className="text-slate-600" /></span>
-        <div className="text-base font-bold text-slate-800" style={{ fontFamily: "Chivo, sans-serif" }}>Log Akses</div>
-        <div className="text-xs text-slate-500 mt-1 leading-relaxed">Catatan akses portal & perubahan PIN.</div>
-      </button>
     </div>
   );
 }

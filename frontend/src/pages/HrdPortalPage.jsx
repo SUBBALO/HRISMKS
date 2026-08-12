@@ -604,6 +604,27 @@ function PayslipsSection({ hapi, can }) {
         Klik ikon <PencilSimple size={12} className="inline" /> untuk membuka & mengedit isi slip (termasuk email). Take Home diambil dari kolom PEMBULATAN.
       </div>
 
+      {items.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3" data-testid="hrd-slip-summary">
+          <div className="bg-white border border-slate-200 rounded-md px-3 py-2">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Karyawan</div>
+            <div className="text-base font-bold text-slate-800" data-testid="hrd-slip-sum-count">{items.length}</div>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-md px-3 py-2">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Total Take Home</div>
+            <div className="text-base font-bold text-emerald-700" data-testid="hrd-slip-sum-takehome">{formatRupiah(items.reduce((a, s) => a + (Number(s.take_home) || 0), 0))}</div>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-md px-3 py-2">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Email Terkirim</div>
+            <div className="text-base font-bold text-slate-800" data-testid="hrd-slip-sum-sent">{items.filter((s) => s.email_status === "terkirim").length} <span className="text-xs font-normal text-slate-400">/ {items.length}</span></div>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-md px-3 py-2">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Tanpa Email</div>
+            <div className={`text-base font-bold ${items.filter((s) => !s.email).length ? "text-amber-600" : "text-slate-800"}`} data-testid="hrd-slip-sum-noemail">{items.filter((s) => !s.email).length}</div>
+          </div>
+        </div>
+      )}
+
       <Card className="overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">

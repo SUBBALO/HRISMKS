@@ -2,6 +2,7 @@
 Portal dikunci PIN — bahkan admin harus masukkan PIN untuk melihat data gaji."""
 import io
 import uuid
+from pathlib import Path
 import smtplib
 import ssl
 from datetime import datetime, timezone, timedelta
@@ -634,18 +635,6 @@ def _norm_date(v):
     return ""
 
 
-def _birth_password(slip):
-    """Password PDF = tanggal lahir format DDMMYYYY. None bila tidak ada."""
-    iso = _norm_date(slip.get("tanggal_lahir"))
-    if not iso:
-        return None
-    try:
-        y, m, d = iso.split("-")
-        return f"{int(d):02d}{int(m):02d}{int(y):04d}"
-    except Exception:
-        return None
-
-
 def _parse_directory(wb):
     """Baca sheet direktori (mis. 'Daftar Gaji') yang punya header NAMA & EMAIL.
     Kembalikan peta email + tanggal lahir per NAMA dan per NIK."""
@@ -889,7 +878,7 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
 
 
 # ---------------- PDF slip ----------------
-COMPANY_ADDRESS = ["Taiwan International Park Blok B No. 117", "Kabil, Nongsa - Batam Island"]
+KOP_SURAT_PATH = Path(__file__).resolve().parent.parent / "assets" / "kop_surat.pdf"
 
 
 def _rp(v):
@@ -950,7 +939,25 @@ def _terbilang_rupiah(n) -> str:
     return " ".join(w.capitalize() for w in words.split()) + " Rupiah"
 
 
-def _render_slip_pdf(slip: dict, sender_name: str = "PT. MITRA KARYA SARANA", printed_by: str = "", password: str | None = None) -> io.BytesIO:
+def _merge_with_kop(content_buf: io.BytesIO) -> io.BytesIO:
+    """Overlay konten slip di atas kop surat resmi perusahaan (vektor, tetap tajam)."""
+    if not KOP_SURAT_PATH.exists():
+        content_buf.seek(0)
+        return content_buf
+    from pypdf import PdfReader, PdfWriter
+    content = PdfReader(content_buf)
+    writer = PdfWriter()
+    for cp in content.pages:
+        bg = PdfReader(str(KOP_SURAT_PATH)).pages[0]
+        bg.merge_page(cp)
+        writer.add_page(bg)
+    out = io.BytesIO()
+    writer.write(out)
+    out.seek(0)
+    return out
+
+
+def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib import colors
@@ -958,39 +965,55 @@ def _render_slip_pdf(slip: dict, sender_name: str = "PT. MITRA KARYA SARANA", pr
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
     buf = io.BytesIO()
-    enc = None
-    if password:
-        from reportlab.lib import pdfencrypt
-        enc = pdfencrypt.StandardEncryption(userPassword=str(password), canPrint=1)
-    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=14 * mm, bottomMargin=12 * mm, leftMargin=16 * mm, rightMargin=16 * mm, encrypt=enc)
+    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=44 * mm, bottomMargin=16 * mm,
+                            leftMargin=16 * mm, rightMargin=16 * mm)
     styles = getSampleStyleSheet()
     small = ParagraphStyle("s", parent=styles["Normal"], fontSize=9)
     tiny = ParagraphStyle("tn", parent=styles["Normal"], fontSize=7.5, textColor=colors.HexColor("#475569"))
     elems = []
     GREY = colors.HexColor("#334155")
+    LINE = colors.HexColor("#94A3B8")
+    DARK = colors.HexColor("#1E293B")
+    LIGHT = colors.HexColor("#F1F5F9")
+    ORANGE_BG = colors.HexColor("#FFF7ED")
+    ORANGE = colors.HexColor("#C2410C")
+    CW = 178 * mm  # lebar konten total
 
-    # Header perusahaan
-    elems.append(Paragraph(f"<b>{sender_name}</b>", ParagraphStyle("c", parent=styles["Normal"], fontSize=11, fontName="Helvetica-Bold")))
-    for line in COMPANY_ADDRESS:
-        elems.append(Paragraph(line, ParagraphStyle("addr", parent=styles["Normal"], fontSize=8)))
-    elems.append(Spacer(1, 6))
-    elems.append(Paragraph("<u>SLIP GAJI</u>", ParagraphStyle("t", parent=styles["Normal"], fontSize=12, alignment=1, fontName="Helvetica-Bold")))
+    # Judul: band gelap "SLIP GAJI" + baris periode
     per = f"{BULAN_ID.get(slip.get('period_month'), slip.get('period_month'))} {slip.get('period_year')}"
-    elems.append(Paragraph(f"Periode : {per}", ParagraphStyle("per", parent=small, alignment=1)))
+    title = Table([
+        [Paragraph("SLIP GAJI", ParagraphStyle("t", parent=styles["Normal"], fontSize=13,
+                                               alignment=1, fontName="Helvetica-Bold",
+                                               textColor=colors.white))],
+        [Paragraph(f"Periode : <b>{per}</b>", ParagraphStyle("per", parent=small, alignment=1, fontSize=9.5))],
+    ], colWidths=[CW])
+    title.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, 0), DARK),
+        ("BACKGROUND", (0, 1), (0, 1), LIGHT),
+        ("BOX", (0, 0), (-1, -1), 0.8, DARK),
+        ("TOPPADDING", (0, 0), (0, 0), 5), ("BOTTOMPADDING", (0, 0), (0, 0), 5),
+        ("TOPPADDING", (0, 1), (0, 1), 3), ("BOTTOMPADDING", (0, 1), (0, 1), 3),
+    ]))
+    elems.append(title)
     elems.append(Spacer(1, 8))
 
     # Info karyawan (kiri) + rate (kanan)
     nik = slip.get("nik", "")
     info = Table([
-        ["Nama / NIK", ":", slip.get("nama", ""), nik, "Perhari", ":", _money(slip.get("perhari"))],
-        ["Dept", ":", slip.get("dept", "") or "Production", "", "Lembur/Jam", ":", _money(slip.get("lembur_jam"))],
-        ["Jabatan", ":", slip.get("jabatan", ""), "", "T. Kehadiran", ":", _money(slip.get("tkehadiran_rate"))],
-    ], colWidths=[22 * mm, 4 * mm, 40 * mm, 24 * mm, 26 * mm, 4 * mm, 38 * mm])
-    info.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 9), ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                              ("ALIGN", (6, 0), (6, -1), "RIGHT"),
-                              ("BOTTOMPADDING", (0, 0), (-1, -1), 2), ("TOPPADDING", (0, 0), (-1, -1), 1)]))
+        ["Nama", ":", slip.get("nama", ""), "Perhari", ":", _money(slip.get("perhari"))],
+        ["NIK", ":", nik, "Lembur/Jam", ":", _money(slip.get("lembur_jam"))],
+        ["Dept", ":", slip.get("dept", "") or "Production", "T. Kehadiran", ":", _money(slip.get("tkehadiran_rate"))],
+        ["Jabatan", ":", slip.get("jabatan", ""), "", "", ""],
+    ], colWidths=[20 * mm, 4 * mm, 66 * mm, 28 * mm, 4 * mm, 56 * mm])
+    info.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 9), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTNAME", (2, 0), (2, 0), "Helvetica-Bold"),
+        ("ALIGN", (5, 0), (5, -1), "RIGHT"),
+        ("TEXTCOLOR", (0, 0), (0, -1), GREY), ("TEXTCOLOR", (3, 0), (3, -1), GREY),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5), ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+    ]))
     elems.append(info)
-    elems.append(Spacer(1, 6))
+    elems.append(Spacer(1, 7))
 
     # Tabel PENGHASILAN | PENGURANGAN
     earns = slip.get("earnings", []) or []
@@ -1011,54 +1034,92 @@ def _render_slip_pdf(slip: dict, sender_name: str = "PT. MITRA KARYA SARANA", pr
         ])
     rows.append(["JUMLAH", "", _money(slip.get("gross")), "JUMLAH", "", _money(slip.get("total_deduction"))])
     rows.append(["", "", "", "PENGHASILAN BERSIH", "", _money(slip.get("net"))])
-    rows.append(["", "", "", "PEMBULATAN", "", _money(slip.get("take_home"))])
+    rows.append(["", "", "", "TAKE HOME PAY", "", _money(slip.get("take_home"))])
 
     jml_row = len(rows) - 3
-    t = Table(rows, colWidths=[34 * mm, 12 * mm, 40 * mm, 34 * mm, 14 * mm, 38 * mm])
+    t = Table(rows, colWidths=[36 * mm, 12 * mm, 41 * mm, 34 * mm, 14 * mm, 41 * mm])
     t.setStyle(TableStyle([
         ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        # header
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), LIGHT),
+        ("TEXTCOLOR", (0, 0), (-1, 0), DARK),
+        ("TOPPADDING", (0, 0), (-1, 0), 4), ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
+        # alignment
         ("ALIGN", (2, 0), (2, -1), "RIGHT"), ("ALIGN", (5, 0), (5, -1), "RIGHT"),
         ("ALIGN", (1, 0), (1, -1), "CENTER"), ("ALIGN", (4, 0), (4, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, GREY),           # bawah header
-        ("LINEABOVE", (0, jml_row), (-1, jml_row), 0.6, GREY),  # atas JUMLAH
+        # garis
+        ("LINEBELOW", (0, 0), (-1, 0), 0.7, GREY),
+        ("LINEBELOW", (0, 1), (-1, jml_row - 1), 0.25, colors.HexColor("#E2E8F0")),
+        ("LINEABOVE", (0, jml_row), (-1, jml_row), 0.7, GREY),
+        # JUMLAH
         ("FONTNAME", (0, jml_row), (-1, jml_row), "Helvetica-Bold"),
+        ("BACKGROUND", (0, jml_row), (-1, jml_row), LIGHT),
+        # PENGHASILAN BERSIH & TAKE HOME
         ("FONTNAME", (3, jml_row + 1), (5, jml_row + 2), "Helvetica-Bold"),
         ("LINEABOVE", (3, jml_row + 1), (5, jml_row + 1), 0.4, GREY),
-        ("BOX", (0, 0), (2, jml_row), 0.8, GREY),            # box kolom penghasilan
-        ("BOX", (3, 0), (5, jml_row + 2), 0.8, GREY),        # box kolom pengurangan
-        ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("BACKGROUND", (3, jml_row + 2), (5, jml_row + 2), ORANGE_BG),
+        ("TEXTCOLOR", (3, jml_row + 2), (5, jml_row + 2), ORANGE),
+        ("FONTSIZE", (3, jml_row + 2), (5, jml_row + 2), 9.5),
+        ("BOX", (3, jml_row + 2), (5, jml_row + 2), 0.8, ORANGE),
+        # box kolom
+        ("BOX", (0, 0), (2, jml_row), 0.8, GREY),
+        ("BOX", (3, 0), (5, jml_row + 2), 0.8, GREY),
+        ("LINEBEFORE", (3, 0), (3, jml_row), 0.8, GREY),
+        ("TOPPADDING", (0, 1), (-1, -1), 3), ("BOTTOMPADDING", (0, 1), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
     ]))
     elems.append(t)
     elems.append(Spacer(1, 8))
 
+    # Terbilang dalam kotak
     terb = slip.get("terbilang") or _terbilang_rupiah(slip.get("take_home"))
-    elems.append(Paragraph(f"Terbilang : <i>{terb}</i>", small))
+    terb_tbl = Table([[Paragraph(f"<b>Terbilang</b> : <i>{terb}</i>", small)]], colWidths=[CW])
+    terb_tbl.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, LINE), ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    elems.append(terb_tbl)
 
     if slip.get("notes"):
-        elems.append(Spacer(1, 4))
+        elems.append(Spacer(1, 5))
         elems.append(Paragraph(f"Catatan : {slip['notes']}", small))
 
-    elems.append(Spacer(1, 22))
+    # Blok validasi digital (tanpa tanda tangan)
+    elems.append(Spacer(1, 12))
     tgl = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7)))
-    tgl_str = f"Batam, {tgl.day} {BULAN_ID.get(tgl.month)} {tgl.year}"
-    right = Table([[tgl_str], ["Prepared By,"], ["HRD"]], colWidths=[70 * mm])
-    right.hAlign = "RIGHT"
-    right.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 9), ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                               ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]))
-    elems.append(right)
-
-    elems.append(Spacer(1, 16))
+    tgl_str = f"{tgl.day} {BULAN_ID.get(tgl.month)} {tgl.year}"
     stamp = tgl.strftime("%d-%m-%Y %H:%M") + " WIB"
-    by = f" oleh {printed_by}" if printed_by else ""
-    elems.append(Paragraph(
-        f"Dokumen ini dicetak otomatis oleh sistem pada {stamp}{by}. "
-        f"Tidak memerlukan tanda tangan basah. Bersifat rahasia — mohon tidak menyebarkan.",
-        ParagraphStyle("f", parent=tiny, fontSize=7, textColor=colors.grey)))
+    no_dok = f"SG/{slip.get('period_year')}/{int(slip.get('period_month') or 0):02d}/{(slip.get('nik') or '-').replace(' ', '')}"
+    note_style = ParagraphStyle("nv", parent=styles["Normal"], fontSize=7.5, textColor=GREY, leading=10)
+    valid_tbl = Table([
+        [Paragraph(f"<b>No. Dokumen</b> : {no_dok}", note_style),
+         Paragraph(f"Diterbitkan secara elektronik oleh <b>HRD — PT. Mitra Karya Sarana</b><br/>Batam, {tgl_str} ({stamp})",
+                   ParagraphStyle("nvr", parent=note_style, alignment=2))],
+        [Paragraph("Dokumen ini diproses otomatis oleh sistem HRIS dan <b>sah tanpa tanda tangan basah</b>. "
+                   "<b>RAHASIA</b> — slip gaji bersifat pribadi, mohon tidak disebarluaskan.",
+                   ParagraphStyle("nvb", parent=note_style, textColor=colors.HexColor("#64748B"))), ""],
+    ], colWidths=[CW / 2, CW / 2])
+    valid_tbl.setStyle(TableStyle([
+        ("SPAN", (0, 1), (1, 1)),
+        ("BOX", (0, 0), (-1, -1), 0.5, LINE),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.4, colors.HexColor("#E2E8F0")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    elems.append(valid_tbl)
+
+    if printed_by:
+        elems.append(Spacer(1, 5))
+        elems.append(Paragraph(f"Dicetak oleh: {printed_by}",
+                               ParagraphStyle("f", parent=tiny, fontSize=7, textColor=colors.grey)))
     pdf.build(elems)
     buf.seek(0)
-    return buf
+    return _merge_with_kop(buf)
 
 
 @router.get("/payslips/{sid}/pdf")
@@ -1066,9 +1127,7 @@ async def payslip_pdf(sid: str, current: dict = Depends(require_hrd_perm("hrd_sl
     slip = await db.hrd_payslips.find_one({"id": sid, **NOT_DELETED_FILTER}, {"_id": 0})
     if not slip:
         raise HTTPException(status_code=404, detail="Slip tidak ditemukan")
-    s = await db.hrd_settings.find_one({"_id": "hrd"}) or {}
-    buf = _render_slip_pdf(slip, s.get("sender_name") or "PT. MITRA KARYA SARANA",
-                           printed_by=current.get("name") or current.get("username", ""))
+    buf = _render_slip_pdf(slip, printed_by=current.get("name") or current.get("username", ""))
     fname = f"SlipGaji_{slip.get('nama','')}_{slip.get('period_month')}_{slip.get('period_year')}.pdf".replace(" ", "_")
     return StreamingResponse(buf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{fname}"'})
 
@@ -1165,7 +1224,7 @@ async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_
                     msg["Subject"] = subj_tpl.format_map(tvars)
                     body = body_tpl.format_map(tvars)
                     msg.attach(MIMEText(body, "plain"))
-                    pdf_buf = _render_slip_pdf(slip, sender_name, printed_by=current.get("name") or current.get("username", ""))
+                    pdf_buf = _render_slip_pdf(slip, printed_by=current.get("name") or current.get("username", ""))
                     part = MIMEApplication(pdf_buf.read(), _subtype="pdf")
                     part.add_header("Content-Disposition", "attachment",
                                     filename=f"SlipGaji_{per_label}_{slip.get('nama','')}.pdf".replace(" ", "_"))

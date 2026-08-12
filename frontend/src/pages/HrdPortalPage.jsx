@@ -17,6 +17,7 @@ import {
 } from "../components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Checkbox } from "../components/ui/checkbox";
+import DokumenHub from "./HrdDokumen";
 import {
   UsersThree, Receipt, EnvelopeSimple, Gear, ClockCounterClockwise, Lock, LockKey,
   ArrowLeft, Plus, Trash, PencilSimple, FilePdf, DownloadSimple, UploadSimple,
@@ -143,7 +144,7 @@ export default function HrdPortalPage() {
 
         {section === "home" && <HrdHome access={access} isSuper={meta.is_super} hasGajiAccess={hasGajiAccess} gajiPinSet={meta.gaji_pin_set} gajiUnlocked={!!gajiToken} onOpenGaji={openGaji} onOpen={setSection} />}
         {section === "gaji" && <GajiArea hapi={hapi} can={ALL} onGoTab={() => {}} />}
-        {section === "dokumen" && <DokumenSection />}
+        {section === "dokumen" && <DokumenHub can={meta.is_super ? ALL : (access.hrd_dokumen || {})} />}
         {section === "logs" && <LogsSection hapi={hapi} />}
       </div>
 
@@ -211,7 +212,7 @@ function HrdHome({ access, isSuper, hasGajiAccess, gajiPinSet, gajiUnlocked, onO
           className="group relative text-left bg-white border border-slate-200 rounded-lg p-5 hover:border-slate-400 hover:shadow-md transition-all duration-200">
           <span className="w-11 h-11 flex items-center justify-center bg-rose-50 border border-rose-200 rounded-md mb-3"><FolderSimple size={22} weight="duotone" className="text-rose-600" /></span>
           <div className="text-base font-bold text-slate-800" style={{ fontFamily: "Chivo, sans-serif" }}>Dokumen HRD</div>
-          <div className="text-xs text-slate-500 mt-1 leading-relaxed">Absensi, cuti, kontrak, arsip karyawan (segera).</div>
+          <div className="text-xs text-slate-500 mt-1 leading-relaxed">Database karyawan, arsip dokumen (KTP, ijazah, dll), & cetak surat kerja ber-QR.</div>
         </button>
       )}
       <button onClick={() => onOpen("logs")} data-testid="hrd-card-logs"
@@ -974,32 +975,6 @@ function SettingsSection({ hapi, can }) {
 }
 
 /* ============================ Dokumen (placeholder) ============================ */
-function DokumenSection() {
-  const items = [
-    { t: "Absensi", d: "Rekap kehadiran & jam kerja karyawan." },
-    { t: "Cuti & Izin", d: "Pengajuan dan persetujuan cuti/izin." },
-    { t: "Kontrak Kerja", d: "Arsip kontrak & masa berlaku." },
-    { t: "Arsip Dokumen Karyawan", d: "KTP, NPWP, sertifikat, dsb." },
-    { t: "Dashboard HR", d: "Ringkasan headcount, turnover, dll." },
-  ];
-  return (
-    <div data-testid="hrd-dokumen">
-      <h2 className="text-lg font-bold text-slate-800 mb-1">Dokumen HRD</h2>
-      <p className="text-sm text-slate-500 mb-4">Modul dokumen HR akan hadir di sistem HRIS. Berikut rencana fitur:</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {items.map((it) => (
-          <Card key={it.t} className="p-5 relative">
-            <Badge variant="secondary" className="absolute top-3 right-3 text-[10px]">Segera</Badge>
-            <FolderSimple size={22} weight="duotone" className="text-rose-500 mb-2" />
-            <div className="font-bold text-slate-800">{it.t}</div>
-            <div className="text-xs text-slate-500 mt-1">{it.d}</div>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /* ============================ Logs ============================ */
 function LogsSection({ hapi }) {
   const [items, setItems] = useState([]);

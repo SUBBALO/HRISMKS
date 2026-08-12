@@ -17,6 +17,7 @@ from db import db
 from security import hash_password, verify_password
 from routers import auth as auth_router
 from routers import hrd as hrd_router
+from routers import hrd_people as hrd_people_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ async def health():
 
 app.include_router(auth_router.router, prefix="/api")
 app.include_router(hrd_router.router, prefix="/api")
+app.include_router(hrd_people_router.router, prefix="/api")
 app.include_router(api_router)
 
 app.add_middleware(

@@ -1,0 +1,36 @@
+{
+  "summary": "Tested NEW HRD Dokumen feature (people DB + docs upload + surat kerja SKK/SPK + verification). Backend pytest 10/10 pass. Frontend Playwright end-to-end pass on all requested flows: heri login -> Dokumen HRD card, Database Karyawan create/edit/search/delete, Docs dialog upload jpg + reject .txt + delete doc, Surat Kerja create SKK (nomor SKK/2026/08/xxxx + kode HHHH-HHHH-HHHH), Paklaring empty tglkeluar validation, Paklaring with tglkeluar (SPK/...), Verifikasi tab: valid kode -> DOKUMEN ASLI, fake AAAA-BBBB-CCCC -> TIDAK TERDAFTAR, short 'SHORT' -> format error, delete letter -> its kode reverifies as TIDAK TERDAFTAR. Susanto (super) can also open Dokumen HRD (verified via backend GET /api/hrd/people 200). Regression: herliana Gaji PIN 123456 still unlocks payslips and PDF endpoint returns valid PDF (10 slips), PIN NOT touched. Fixed 1 real frontend bug (PersonDialog null-deref on edit-save).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "PersonDialog (HrdDokumen.jsx line 188)", "issue": "FIXED — TypeError: Cannot read properties of null (reading 'nama'). After saving edit, onSaved() sets person=null while the Dialog is still animating out; render used person.nama causing runtime error overlay. Patched to person?.nama ?? f.nama.", "selector": "[data-testid=person-dialog]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_hrd_dokumen.py",
+    "/app/test_reports/pytest/hrd_dokumen.xml"
+  ],
+  "action_items": [
+    "None blocking. Verify the applied null-guard fix in HrdDokumen.jsx PersonDialog looks acceptable."
+  ],
+  "critical_code_review_comments": [
+    "hrd_people.py list_people search regex uses raw user input q — safe against Mongo injection because it's coerced to string regex, but consider escaping regex special chars (., *, +, ?) to avoid ReDoS / unintended matches from user input.",
+    "Letter counter key is per-year only ('letter_{code}_{year}') but nomor embeds month — two letters in different months of same year share seq counter, which is intentional but worth confirming the desired schema (spec says '/{year}/{month}/{seq}').",
+    "delete_person soft-deletes the employee but its docs and issued letters remain queryable/verifiable — consider cascading soft-delete or at least indicating on the letter verify response that the source employee was removed.",
+    "PDF response Content-Disposition uses filename with hyphens replacing slashes but does not URL-encode non-ASCII characters in employee names — some browsers may mangle filenames like `Muhammad_Ãli.pdf`.",
+    "Upload dir /app/backend/uploads/employees is on ephemeral container disk; will be lost on redeploy — should use persistent volume or object storage (S3/GCS)."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/HrdDokumen.jsx",
+    "/app/backend/tests/test_hrd_dokumen.py"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (all HRD Dokumen flows + regressions)"},
+  "test_credentials": "heri/123456, herliana/123456, susanto/Subbalo1994 — all validated. Gaji PIN 123456 preserved (regression test PASSED).",
+  "seed_data_creation": "During run created TEST_UI_* and TEST_UI2_* karyawan + 1 SKK letter — all cleaned up at end via DELETE /api/hrd/people/{id}. Final state: only dev-seeded 'Test Karyawan' (MKS 9999) with SKK/2026/08/0001 kode A116-5FD8-4389 remains (as before). Letter counter for SKK/2026 is now at seq >=0003 (advanced by tests) — irrelevant to functionality.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file: /app/backend/tests/test_hrd_dokumen.py (10 tests, all pass). Run with: pytest backend/tests/test_hrd_dokumen.py -o addopts='' -v. The pytest.ini in /app/backend uses xdist workers — pass -o addopts='' to disable. PersonDialog null-guard fix at HrdDokumen.jsx:188 must be preserved. herliana PIN 123456 unchanged; Do NOT reset PIN. Dev-seeded letter kode A116-5FD8-4389 preserved.",
+  "rca of the issue": "PersonDialog: when user saved an edited karyawan, parent set edit=null immediately. Radix Dialog stays mounted during close animation, but the DialogTitle referenced person.nama unconditionally, and inner state f still had f.id truthy → threw TypeError. Fix: use optional chaining + fallback to f.nama for the header title. No other similar unguarded refs to person.* in that component (all other reads go through the local state f)."
+}

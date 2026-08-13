@@ -299,6 +299,7 @@ function PersonDialog({ person, onClose, onSaved }) {
             <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => addRow("riwayat_pendidikan", { jenjang: "", jurusan: "", institusi: "", tahun: "" })} data-testid="person-add-edu"><Plus size={13} /> Baris</Button>
           </div>
           <div className="space-y-1.5">
+            <div className="grid grid-cols-12 gap-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wide px-0.5"><div className="col-span-2">Jenjang</div><div className="col-span-4">Jurusan</div><div className="col-span-4">Institusi</div><div className="col-span-1">Thn</div><div className="col-span-1"></div></div>
             {(f.riwayat_pendidikan || []).map((r, i) => (
               <div key={i} className="grid grid-cols-12 gap-1.5 items-center" data-testid={`person-edu-${i}`}>
                 <Input className="h-8 text-xs col-span-2" value={r.jenjang} placeholder="Jenjang" onChange={(e) => setRow("riwayat_pendidikan", i, "jenjang", e.target.value)} />
@@ -316,6 +317,7 @@ function PersonDialog({ person, onClose, onSaved }) {
             <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => addRow("riwayat_pengalaman", { posisi: "", perusahaan: "", periode: "" })} data-testid="person-add-exp"><Plus size={13} /> Baris</Button>
           </div>
           <div className="space-y-1.5">
+            <div className="grid grid-cols-12 gap-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wide px-0.5"><div className="col-span-4">Posisi / Jabatan</div><div className="col-span-4">Perusahaan</div><div className="col-span-3">Periode</div><div className="col-span-1"></div></div>
             {(f.riwayat_pengalaman || []).map((r, i) => (
               <div key={i} className="grid grid-cols-12 gap-1.5 items-center" data-testid={`person-exp-${i}`}>
                 <Input className="h-8 text-xs col-span-4" value={r.posisi} placeholder="Posisi/Jabatan" onChange={(e) => setRow("riwayat_pengalaman", i, "posisi", e.target.value)} />
@@ -332,6 +334,7 @@ function PersonDialog({ person, onClose, onSaved }) {
             <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => addRow("anggota_keluarga", { nama: "", hubungan: "", nik: "", tanggal_lahir: "", pekerjaan: "" })} data-testid="person-add-kel"><Plus size={13} /> Baris</Button>
           </div>
           <div className="space-y-1.5">
+            <div className="flex gap-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wide px-0.5"><div className="flex-[3]">Nama</div><div className="flex-[2]">Hubungan</div><div className="flex-[3]">NIK</div><div className="flex-[2]">Tgl Lahir</div><div className="flex-[2]">Pekerjaan</div><div className="w-[14px] shrink-0"></div></div>
             {(f.anggota_keluarga || []).map((r, i) => (
               <div key={i} className="flex items-center gap-1.5" data-testid={`person-kel-${i}`}>
                 <Input className="h-8 text-xs flex-[3]" value={r.nama || ""} placeholder="Nama" onChange={(e) => setRow("anggota_keluarga", i, "nama", e.target.value)} />

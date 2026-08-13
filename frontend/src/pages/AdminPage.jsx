@@ -17,6 +17,7 @@ import {
 } from "../components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { ShieldCheck, Plus, PencilSimple, Trash, ArrowLeft, LockKey } from "@phosphor-icons/react";
+import { RecycleBin, BackupButton } from "../components/AdminTools";
 
 const errMsg = (e) => formatApiErrorDetail(e?.response?.data?.detail) || e?.message || "Terjadi kesalahan";
 const ROLES = [
@@ -166,6 +167,7 @@ export default function AdminPage() {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate("/")}><ArrowLeft size={15} /> Portal HRD</Button>
+            <BackupButton />
             <Button className="bg-teal-600 hover:bg-teal-700 gap-1.5" onClick={openNew} data-testid="admin-add-user"><Plus size={16} weight="bold" /> Tambah User</Button>
           </div>
         </div>
@@ -202,6 +204,8 @@ export default function AdminPage() {
             </tbody>
           </table>
         </Card>
+
+        <RecycleBin />
       </div>
 
       <Dialog open={dlg} onOpenChange={setDlg}>

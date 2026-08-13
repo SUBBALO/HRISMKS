@@ -45,3 +45,14 @@ Extract ONLY the HRD module from an existing ERP (github.com/SUBBALO/PROCUREMENT
 - FOTO PROFIL: POST/GET /api/hrd/people/{id}/photo (JPG/PNG/WEBP max 5MB, file photo.{ext} di uploads/employees/{id}/, cache-bust photo_ver). Avatar component (named export dari HrdDokumen.jsx) di tabel karyawan, detail popup (tombol kamera, testid person-photo-input), struktur organisasi.
 - EXPORT EXCEL: GET /api/hrd/attendance/export?year&month + GET /api/hrd/leaves/export?year (2 sheet Riwayat+Saldo), styled openpyxl. Tombol UI: cuti-export, abs-export (helper downloadXlsx di lib/api).
 - Self-tested: xlsx valid (curl+openpyxl), foto upload/get 200, screenshot UI (5 baris karyawan + avatar, popup detail + kamera, tombol export tampil). Foto test di Harjono sudah dibersihkan.
+
+## 2026-08 batch besar (user beri wewenang penuh): AI + Akses + Admin Tools
+- AI (EMERGENT_LLM_KEY di backend/.env, lib emergentintegrations): /app/backend/routers/hrd_ai.py
+  1. Screening CV: POST /api/hrd/candidates/upload-cv (gemini-2.5-flash + file attach) -> ekstrak nama/kontak/pendidikan/pengalaman/skill/ringkasan + skor kecocokan vs job_desc; kandidat CRUD + status (Baru/Interview/Diterima/Ditolak) + hire -> jadi karyawan. UI: sidebar "Rekrutmen" (HrdAi.jsx RekrutmenSection).
+  2. Draft Surat AI: POST /api/hrd/ai/draft-letter (gpt-5.4) jenis sp/panggilan/memo/pengumuman + kronologi -> draft; POST /api/hrd/ai/save-letter -> ARSIP TERPUSAT BERNOMOR (LETTER_KINDS extended: SP/SPG/IM/PU + counters + kode HMAC + QR PDF body-based branch di hrd_people._render_letter_pdf); SP + karyawan -> auto entry Riwayat Karir. UI: sidebar "Draft Surat AI" (DraftAiSection).
+  3. OCR KTP: POST /api/hrd/ai/ocr-ktp -> prefill form karyawan. UI: tombol "Scan KTP (AI)" (ktp-scan-btn) di Database Karyawan.
+- Akses: /api/hrd/logs hanya _can_manage_pin (herliana); heri & susanto 403. Sidebar: logs hanya can_manage_gaji_pin; susanto (super) portal = hanya super-home-card (tanpa menu HRD), wewenang: Admin Panel + Backup + Recycle Bin.
+- Admin tools: /app/backend/routers/admin_tools.py — GET /api/admin/recycle-bin (semua koleksi soft-deleted, sisa hari, lazy purge 30 hari + hapus file fisik CV/dokumen saat purge), POST restore, GET /api/admin/backup (ZIP JSON semua koleksi). UI: /app/frontend/src/components/AdminTools.jsx (RecycleBin table + BackupButton) dipasang di AdminPage.
+- Header dirapikan sebelumnya: judul "Portal HRD"+logo dihapus; AccountMenu di topbar (App.js -> components/AccountMenu.jsx): Ubah Password (semua user, /api/auth/change-password) + Ubah PIN Gaji (hanya herliana).
+- Testing iteration_9: 14/14 backend + frontend 100%; tests: /app/backend/tests/test_new_batch_ai_rekrut_admin.py (pytest -o addopts='').
+- 36 form HRD user tersimpan di /root/hrd_forms (MKS-F-HRD-001..036). BELUM dibuat: Arsip Form digital, modul Training, dst (lihat analisis chat). Pengumuman->ERP link (opsi API key) belum diputuskan user.

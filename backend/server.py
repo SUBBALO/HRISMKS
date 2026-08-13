@@ -19,6 +19,8 @@ from routers import auth as auth_router
 from routers import hrd as hrd_router
 from routers import hrd_people as hrd_people_router
 from routers import hrd_extras as hrd_extras_router
+from routers import hrd_ai as hrd_ai_router
+from routers import admin_tools as admin_tools_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -41,6 +43,8 @@ app.include_router(auth_router.router, prefix="/api")
 app.include_router(hrd_router.router, prefix="/api")
 app.include_router(hrd_people_router.router, prefix="/api")
 app.include_router(hrd_extras_router.router, prefix="/api")
+app.include_router(hrd_ai_router.router, prefix="/api")
+app.include_router(admin_tools_router.router, prefix="/api")
 app.include_router(api_router)
 
 app.add_middleware(

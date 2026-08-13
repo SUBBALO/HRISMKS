@@ -1,0 +1,27 @@
+{
+  "summary": "Tested new batch (AI CV Screening, Draft AI, save-letter arsip terpusat, OCR KTP, Recycle Bin, Backup DB) + access rules & regression. 14/14 backend pytest PASSED (test_new_batch_ai_rekrut_admin.py) including 3 real AI calls (upload-cv gemini, draft-letter gpt-5.4, ocr-ktp gemini) — each called exactly once. Frontend Playwright verified: heri sidebar shows Rekrutmen+Draft AI but NO Log Akses; herliana has Log Akses; susanto sees only super-home-card + can open /admin with Recycle Bin (31 rows w/ 30-day countdown) & Backup Database button; AccountMenu portal correctly conditional (heri=password only, herliana=password+PIN); Draft AI form (jenis/kronologi/generate testids) renders; Rekrutmen shows Andi Prasetyo w/ skor 95 badge + status Baru dropdown + row-click opens rekrut-detail-dialog; Scan KTP (AI) button visible on Database Karyawan (ktp-scan-btn). Recycle bin restore roundtrip verified via API (announcement 'TEST Updated' restored then re-soft-deleted to preserve state). Backup ZIP is application/zip, >1KB, valid archive with users/hrd_* JSON files. Regression: herliana verify-pin 123456 still returns gaji_token (PIN unchanged). All 5 real employees (Wawan, Harjono, Rahmat, Muhammad Edy, Sumanto) intact on Database Karyawan.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_new_batch_ai_rekrut_admin.py",
+    "/app/test_reports/pytest/new_batch.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "admin_tools.recycle_bin runs a full _purge_expired() on every GET which iterates all 10 collections. Fine for now but consider a scheduled job / rate-limit if the bin grows.",
+    "hrd_ai.upload_cv: on AI failure the temp CV file is unlinked but on parse-JSON success path, the file is kept indefinitely with no cleanup when a candidate is later soft-deleted (soft_delete_one does not unlink CV_DIR/{cid}{ext}). Storage leak over time.",
+    "hrd_ai.ocr_ktp: temp file is unlinked in finally — good. But NIK returned as raw string with no length/format validation; downstream form should re-check 16-digit.",
+    "hrd_ai.save_ai_letter: does not honor payload.tingkat_sp validation (SP1/SP2/SP3) — free string. Minor; UI restricts anyway.",
+    "admin_tools.backup: to_list(100000) hard cap could truncate silently on very large collections; consider a warning header or streaming JSONL per collection."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_new_batch_ai_rekrut_admin.py"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% (all UI checks + access rules)"},
+  "test_credentials": "heri/123456, herliana/123456, susanto/Subbalo1994. Gaji PIN 123456 unchanged (verify-pin returns valid gaji_token).",
+  "seed_data_creation": "During AI tests: 1 TEST_CANDIDATE (deleted), 1 memo letter TEST body (deleted), no OCR persistence. Recycle bin: 1 item ('TEST Updated' announcement) restored then re-soft-deleted via susanto DELETE /api/hrd/announcements/{id} — bin state preserved (31 items → 31 items).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run: pytest backend/tests/test_new_batch_ai_rekrut_admin.py -o addopts='' -v (uses REACT_APP_BACKEND_URL from env or frontend/.env fallback). AI endpoints call live Emergent LLM — mind the cost. NAV testids: heri/herliana Dokumen HRD uses hrd-card-dokumen (NOT hrd-nav-dokumen). AccountMenu (Radix) portal opens outside root — wait ~5s after login for the 'Selamat datang' toast to dismiss before clicking [data-testid=account-menu-btn], otherwise toast intercepts. Recycle bin currently holds 31 items (all TEST_* fixtures from prior iterations); do NOT purge or the days_left assertions may drift.",
+  "rca of the issue": "N/A — no bugs found."
+}

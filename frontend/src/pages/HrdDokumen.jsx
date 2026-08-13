@@ -105,6 +105,7 @@ function PeopleSection({ can }) {
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState(null);       // person object or EMPTY_PERSON
   const [detail, setDetail] = useState(null);   // person for detail popup
+  const [ktpBusy, setKtpBusy] = useState(false);
   const [delId, setDelId] = useState(null);
 
   const load = useCallback(async () => {
@@ -134,9 +135,28 @@ function PeopleSection({ can }) {
             className="pl-9 w-72" data-testid="people-search" />
         </div>
         {can?.create && (
-          <Button size="sm" className="bg-rose-600 hover:bg-rose-700 gap-1.5" onClick={() => setEdit({ ...EMPTY_PERSON })} data-testid="people-add-btn">
-            <Plus size={15} weight="bold" /> Tambah Karyawan
-          </Button>
+          <div className="flex items-center gap-2">
+            <label className="inline-flex">
+              <input type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" hidden data-testid="ktp-scan-input"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0]; e.target.value = "";
+                  if (!f) return;
+                  setKtpBusy(true); toast.info("AI membaca KTP… (10-20 detik)");
+                  try {
+                    const fd = new FormData(); fd.append("file", f);
+                    const r = await api.post("/hrd/ai/ocr-ktp", fd, { timeout: 120000 });
+                    setEdit({ ...EMPTY_PERSON, ...r.data });
+                    toast.success("KTP terbaca — periksa & lengkapi datanya");
+                  } catch (err) { toast.error(errMsg(err)); } finally { setKtpBusy(false); }
+                }} />
+              <Button size="sm" variant="outline" className="gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50" asChild disabled={ktpBusy}>
+                <span className="cursor-pointer" data-testid="ktp-scan-btn"><Camera size={15} /> {ktpBusy ? "Membaca KTP…" : "Scan KTP (AI)"}</span>
+              </Button>
+            </label>
+            <Button size="sm" className="bg-rose-600 hover:bg-rose-700 gap-1.5" onClick={() => setEdit({ ...EMPTY_PERSON })} data-testid="people-add-btn">
+              <Plus size={15} weight="bold" /> Tambah Karyawan
+            </Button>
+          </div>
         )}
       </div>
 
@@ -590,7 +610,7 @@ function DocPreviewDialog({ doc, onClose }) {
 }
 
 /* ============================ Surat Kerja ============================ */
-const JENIS_LABEL = { skk: "Surat Keterangan Kerja", paklaring: "Surat Pengalaman Kerja" };
+const JENIS_LABEL = { skk: "Surat Keterangan Kerja", paklaring: "Surat Pengalaman Kerja", sp: "Surat Peringatan", panggilan: "Surat Panggilan", memo: "Internal Memo", pengumuman: "Pengumuman" };
 
 function LettersSection({ can }) {
   const [people, setPeople] = useState([]);

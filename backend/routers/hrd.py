@@ -364,6 +364,9 @@ ACTION_LABEL = {
 
 @router.get("/logs")
 async def hrd_logs(current: dict = Depends(require_hrd)):
+    # Hanya pemegang wewenang PIN Gaji (Herliana). Heri & super admin tidak boleh.
+    if not _can_manage_pin(current):
+        raise HTTPException(status_code=403, detail="Anda tidak punya akses Log HRD")
     items = await db.activity_logs.find(
         {"action": {"$in": HRD_LOG_ACTIONS}}, {"_id": 0}
     ).sort("timestamp", -1).to_list(300)

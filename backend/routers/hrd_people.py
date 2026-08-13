@@ -217,7 +217,11 @@ async def delete_doc(doc_id: str, current: dict = Depends(require_hrd_perm("hrd_
 
 # ---------------- Surat Kerja (SKK / Paklaring) ----------------
 LETTER_KINDS = {"skk": {"code": "SKK", "title": "SURAT KETERANGAN KERJA"},
-                "paklaring": {"code": "SPK", "title": "SURAT PENGALAMAN KERJA"}}
+                "paklaring": {"code": "SPK", "title": "SURAT PENGALAMAN KERJA"},
+                "sp": {"code": "SP", "title": "SURAT PERINGATAN"},
+                "panggilan": {"code": "SPG", "title": "SURAT PANGGILAN"},
+                "memo": {"code": "IM", "title": "INTERNAL MEMO"},
+                "pengumuman": {"code": "PU", "title": "PENGUMUMAN"}}
 
 
 class LetterIn(BaseModel):
@@ -376,7 +380,7 @@ def _render_letter_pdf(rec: dict) -> io.BytesIO:
     elems.append(head)
     elems.append(Spacer(1, 16))
 
-    elems.append(Paragraph(f"<u>{kind['title']}</u>",
+    elems.append(Paragraph(f"<u>{kind['title']}{(' ' + rec['tingkat_sp']) if rec.get('tingkat_sp') else ''}</u>",
                            ParagraphStyle("t", parent=styles["Normal"], fontSize=13, alignment=1,
                                           fontName="Helvetica-Bold", textColor=DARK)))
     elems.append(Spacer(1, 3))
@@ -384,41 +388,51 @@ def _render_letter_pdf(rec: dict) -> io.BytesIO:
                            ParagraphStyle("no", parent=small, alignment=1, textColor=GREY)))
     elems.append(Spacer(1, 14))
 
-    elems.append(Paragraph("Yang bertanda tangan di bawah ini, Departemen HRD <b>PT. Mitra Karya Sarana</b>, "
-                           "dengan ini menerangkan bahwa :", body))
-    elems.append(Spacer(1, 8))
-
-    masa = _masa_kerja_text(rec)
-    info = Table([
-        ["Nama", ":", rec.get("nama", "")],
-        ["NIK Karyawan", ":", rec.get("nik", "") or "-"],
-        ["Departemen", ":", rec.get("dept", "") or "-"],
-        ["Jabatan", ":", rec.get("jabatan", "") or "-"],
-        ["Masa Kerja", ":", masa],
-    ], colWidths=[38 * mm, 5 * mm, 127 * mm])
-    info.setStyle(TableStyle([
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("FONTNAME", (2, 0), (2, 0), "Helvetica-Bold"),
-        ("TEXTCOLOR", (0, 0), (0, -1), GREY),
-        ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-        ("LEFTPADDING", (0, 0), (0, -1), 12),
-    ]))
-    elems.append(info)
-    elems.append(Spacer(1, 8))
-
-    if rec["jenis"] == "skk":
-        elems.append(Paragraph("adalah benar karyawan <b>PT. Mitra Karya Sarana</b> yang masih aktif bekerja "
-                               "sampai dengan surat ini diterbitkan, dan selama bekerja yang bersangkutan menunjukkan "
-                               "dedikasi, loyalitas, serta tanggung jawab yang baik terhadap perusahaan.", body))
+    if rec.get("body"):
+        # Surat berbasis teks bebas (SP/Panggilan/Memo/Pengumuman dari Draft AI)
+        from xml.sax.saxutils import escape
+        for para in rec["body"].split("\n\n"):
+            if para.strip():
+                elems.append(Paragraph(escape(para.strip()).replace("\n", "<br/>"), body))
+                elems.append(Spacer(1, 6))
+        elems.append(Spacer(1, 10))
     else:
-        elems.append(Paragraph("adalah benar pernah bekerja di <b>PT. Mitra Karya Sarana</b> pada periode tersebut di atas. "
-                               "Selama bekerja yang bersangkutan menunjukkan dedikasi, loyalitas, dan tanggung jawab yang baik, "
-                               "serta mengakhiri hubungan kerja dengan baik. Kami mengucapkan terima kasih atas kontribusinya "
-                               "dan mendoakan kesuksesan di masa mendatang.", body))
-    elems.append(Spacer(1, 6))
-    keperluan = rec.get("keperluan") or "untuk dapat dipergunakan sebagaimana mestinya"
-    elems.append(Paragraph(f"Demikian surat keterangan ini dibuat dengan sebenarnya {keperluan}.", body))
-    elems.append(Spacer(1, 16))
+        elems.append(Paragraph("Yang bertanda tangan di bawah ini, Departemen HRD <b>PT. Mitra Karya Sarana</b>, "
+                               "dengan ini menerangkan bahwa :", body))
+        elems.append(Spacer(1, 8))
+
+    if not rec.get("body"):
+        masa = _masa_kerja_text(rec)
+        info = Table([
+            ["Nama", ":", rec.get("nama", "")],
+            ["NIK Karyawan", ":", rec.get("nik", "") or "-"],
+            ["Departemen", ":", rec.get("dept", "") or "-"],
+            ["Jabatan", ":", rec.get("jabatan", "") or "-"],
+            ["Masa Kerja", ":", masa],
+        ], colWidths=[38 * mm, 5 * mm, 127 * mm])
+        info.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("FONTNAME", (2, 0), (2, 0), "Helvetica-Bold"),
+            ("TEXTCOLOR", (0, 0), (0, -1), GREY),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+            ("LEFTPADDING", (0, 0), (0, -1), 12),
+        ]))
+        elems.append(info)
+        elems.append(Spacer(1, 8))
+
+        if rec["jenis"] == "skk":
+            elems.append(Paragraph("adalah benar karyawan <b>PT. Mitra Karya Sarana</b> yang masih aktif bekerja "
+                                   "sampai dengan surat ini diterbitkan, dan selama bekerja yang bersangkutan menunjukkan "
+                                   "dedikasi, loyalitas, serta tanggung jawab yang baik terhadap perusahaan.", body))
+        else:
+            elems.append(Paragraph("adalah benar pernah bekerja di <b>PT. Mitra Karya Sarana</b> pada periode tersebut di atas. "
+                                   "Selama bekerja yang bersangkutan menunjukkan dedikasi, loyalitas, dan tanggung jawab yang baik, "
+                                   "serta mengakhiri hubungan kerja dengan baik. Kami mengucapkan terima kasih atas kontribusinya "
+                                   "dan mendoakan kesuksesan di masa mendatang.", body))
+        elems.append(Spacer(1, 6))
+        keperluan = rec.get("keperluan") or "untuk dapat dipergunakan sebagaimana mestinya"
+        elems.append(Paragraph(f"Demikian surat keterangan ini dibuat dengan sebenarnya {keperluan}.", body))
+        elems.append(Spacer(1, 16))
 
     qr_flow = Image(_letter_qr(rec), width=30 * mm, height=30 * mm)
     ver_note = Paragraph(

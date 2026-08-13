@@ -20,6 +20,7 @@ import { Checkbox } from "../components/ui/checkbox";
 import DokumenHub from "./HrdDokumen";
 import DashboardSection from "./HrdDashboard";
 import { CutiSection, AbsensiSection, KinerjaSection, OrgSection, PengumumanSection } from "./HrdModules";
+import { RekrutmenSection, DraftAiSection } from "./HrdAi";
 import {
   UsersThree, Receipt, EnvelopeSimple, Gear, ClockCounterClockwise, Lock, LockKey,
   ArrowLeft, Plus, Trash, PencilSimple, FilePdf, DownloadSimple, UploadSimple,
@@ -104,21 +105,24 @@ export default function HrdPortalPage() {
   };
 
   const NAV = [
-    { key: "home", label: "Beranda", icon: SquaresFour, testid: "hrd-nav-beranda" },
+    ...(!meta.is_super ? [{ key: "home", label: "Beranda", icon: SquaresFour, testid: "hrd-nav-beranda" }] : []),
     ...(hasGajiAccess ? [{ key: "gaji", label: "Data Gaji", icon: Money, lock: true, testid: "hrd-card-gaji" }] : []),
-    ...(showDokumen ? [
+    ...(showDokumen && !meta.is_super ? [
       { key: "dokumen", label: "Dokumen HRD", icon: FolderSimple, testid: "hrd-card-dokumen" },
+      { key: "rekrutmen", label: "Rekrutmen", icon: UsersThree, testid: "hrd-nav-rekrutmen" },
+      { key: "draftai", label: "Draft Surat AI", icon: PencilSimple, testid: "hrd-nav-draftai" },
       { key: "cuti", label: "Cuti & Izin", icon: CalendarBlank, testid: "hrd-nav-cuti" },
       { key: "absensi", label: "Absensi", icon: Timer, testid: "hrd-nav-absensi" },
       { key: "kinerja", label: "Kinerja", icon: Star, testid: "hrd-nav-kinerja" },
       { key: "org", label: "Organisasi", icon: Buildings, testid: "hrd-nav-org" },
       { key: "pengumuman", label: "Pengumuman", icon: Megaphone, testid: "hrd-nav-pengumuman" },
     ] : []),
-    { key: "logs", label: "Log Akses", icon: ClockCounterClockwise, testid: "hrd-card-logs" },
+    ...(meta.can_manage_gaji_pin ? [{ key: "logs", label: "Log Akses", icon: ClockCounterClockwise, testid: "hrd-card-logs" }] : []),
   ];
   const SECTION_TITLES = {
     home: "Beranda", gaji: "", dokumen: "", cuti: "Cuti & Izin", absensi: "Absensi & Rekap",
-    kinerja: "Penilaian Kinerja", org: "Struktur Organisasi", pengumuman: "Pengumuman Internal", logs: "",
+    kinerja: "Penilaian Kinerja", org: "Struktur Organisasi", pengumuman: "Pengumuman Internal",
+    rekrutmen: "Rekrutmen", draftai: "Draft Surat AI", logs: "",
   };
 
   const navBtn = (n, horizontal = false) => {
@@ -179,11 +183,18 @@ export default function HrdPortalPage() {
             {SECTION_TITLES[section] && (
               <h2 className="text-lg font-bold text-slate-800 mb-4" style={{ fontFamily: "Chivo, sans-serif" }}>{SECTION_TITLES[section]}</h2>
             )}
-            {section === "home" && (showDokumen ? <DashboardSection /> : (
+            {section === "home" && (meta.is_super ? (
+              <Card className="p-8 text-center text-sm text-slate-500" data-testid="super-home-card">
+                Anda login sebagai <b>Super Admin</b>. Wewenang Anda: <b>Admin Panel</b> (kelola user & hak akses),
+                <b> Backup</b>, dan <b>Recycle Bin</b> — semuanya ada di tombol <b>Admin</b> di pojok kanan atas.
+              </Card>
+            ) : showDokumen ? <DashboardSection /> : (
               <Card className="p-8 text-center text-sm text-slate-500">Selamat datang di Portal HRD. Gunakan menu di samping untuk membuka modul.</Card>
             ))}
             {section === "gaji" && <GajiArea hapi={hapi} can={ALL} onGoTab={() => {}} />}
             {section === "dokumen" && <DokumenHub can={dokCan} />}
+            {section === "rekrutmen" && <RekrutmenSection can={dokCan} />}
+            {section === "draftai" && <DraftAiSection can={dokCan} />}
             {section === "cuti" && <CutiSection can={dokCan} />}
             {section === "absensi" && <AbsensiSection can={dokCan} />}
             {section === "kinerja" && <KinerjaSection can={dokCan} />}

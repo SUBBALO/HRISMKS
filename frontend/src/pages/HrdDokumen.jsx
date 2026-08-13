@@ -96,6 +96,7 @@ const EMPTY_PERSON = {
   dept: "", jabatan: "", status_karyawan: "", tanggal_masuk: "", tanggal_keluar: "",
   bank: "", no_rekening: "", npwp: "", no_bpjs_tk: "", no_bpjs_kes: "",
   kontak_darurat_nama: "", kontak_darurat_hubungan: "", kontak_darurat_telp: "", catatan: "",
+  riwayat_pendidikan: [], riwayat_pengalaman: [],
 };
 
 function PeopleSection({ can }) {
@@ -222,11 +223,14 @@ function PersonDialog({ person, onClose, onSaved }) {
   useEffect(() => { setF(person ? { ...person } : null); }, [person]);
   if (!f) return null;
   const set = (k) => (e) => setF({ ...f, [k]: e?.target ? e.target.value : e });
+  const addRow = (key, blank) => setF({ ...f, [key]: [...(f[key] || []), blank] });
+  const setRow = (key, i, k, v) => { const a = [...(f[key] || [])]; a[i] = { ...a[i], [k]: v }; setF({ ...f, [key]: a }); };
+  const rmRow = (key, i) => setF({ ...f, [key]: (f[key] || []).filter((_, j) => j !== i) });
   const save = async () => {
     if (!f.nama?.trim()) { toast.error("Nama wajib diisi"); return; }
     setBusy(true);
     try {
-      const payload = Object.fromEntries(Object.keys(EMPTY_PERSON).map((k) => [k, f[k] ?? ""]));
+      const payload = Object.fromEntries(Object.keys(EMPTY_PERSON).map((k) => [k, f[k] ?? EMPTY_PERSON[k]]));
       if (f.id) await api.put(`/hrd/people/${f.id}`, payload);
       else await api.post("/hrd/people", payload);
       toast.success("Data karyawan disimpan"); onSaved();
@@ -287,6 +291,40 @@ function PersonDialog({ person, onClose, onSaved }) {
           <Fld label="Telp Kontak Darurat"><Input value={f.kontak_darurat_telp} onChange={set("kontak_darurat_telp")} /></Fld>
           <div className="col-span-2 md:col-span-3"><Label className="text-xs text-slate-500">Catatan</Label>
             <Textarea rows={2} value={f.catatan} onChange={set("catatan")} /></div>
+        </div>
+
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-rose-600">Riwayat Pendidikan</div>
+            <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => addRow("riwayat_pendidikan", { jenjang: "", jurusan: "", institusi: "", tahun: "" })} data-testid="person-add-edu"><Plus size={13} /> Baris</Button>
+          </div>
+          <div className="space-y-1.5">
+            {(f.riwayat_pendidikan || []).map((r, i) => (
+              <div key={i} className="grid grid-cols-12 gap-1.5 items-center" data-testid={`person-edu-${i}`}>
+                <Input className="h-8 text-xs col-span-2" value={r.jenjang} placeholder="Jenjang" onChange={(e) => setRow("riwayat_pendidikan", i, "jenjang", e.target.value)} />
+                <Input className="h-8 text-xs col-span-4" value={r.jurusan} placeholder="Jurusan" onChange={(e) => setRow("riwayat_pendidikan", i, "jurusan", e.target.value)} />
+                <Input className="h-8 text-xs col-span-4" value={r.institusi} placeholder="Institusi" onChange={(e) => setRow("riwayat_pendidikan", i, "institusi", e.target.value)} />
+                <Input className="h-8 text-xs col-span-1" value={r.tahun} placeholder="Thn" onChange={(e) => setRow("riwayat_pendidikan", i, "tahun", e.target.value)} />
+                <Trash size={14} className="text-rose-500 cursor-pointer col-span-1 mx-auto" onClick={() => rmRow("riwayat_pendidikan", i)} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-rose-600">Riwayat Pengalaman Kerja</div>
+            <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => addRow("riwayat_pengalaman", { posisi: "", perusahaan: "", periode: "" })} data-testid="person-add-exp"><Plus size={13} /> Baris</Button>
+          </div>
+          <div className="space-y-1.5">
+            {(f.riwayat_pengalaman || []).map((r, i) => (
+              <div key={i} className="grid grid-cols-12 gap-1.5 items-center" data-testid={`person-exp-${i}`}>
+                <Input className="h-8 text-xs col-span-4" value={r.posisi} placeholder="Posisi/Jabatan" onChange={(e) => setRow("riwayat_pengalaman", i, "posisi", e.target.value)} />
+                <Input className="h-8 text-xs col-span-4" value={r.perusahaan} placeholder="Perusahaan" onChange={(e) => setRow("riwayat_pengalaman", i, "perusahaan", e.target.value)} />
+                <Input className="h-8 text-xs col-span-3" value={r.periode} placeholder="Periode" onChange={(e) => setRow("riwayat_pengalaman", i, "periode", e.target.value)} />
+                <Trash size={14} className="text-rose-500 cursor-pointer col-span-1 mx-auto" onClick={() => rmRow("riwayat_pengalaman", i)} />
+              </div>
+            ))}
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Batal</Button>
@@ -400,6 +438,26 @@ function PersonDetailDialog({ person, docTypes, can, onClose, onEdit }) {
             <DItem label="Hubungan" value={p.kontak_darurat_hubungan} />
             <DItem label="Telepon" value={p.kontak_darurat_telp} />
           </DSection>
+          {(p.riwayat_pendidikan || []).length > 0 && (
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-rose-600 border-b border-slate-200 pb-1 mb-2">Riwayat Pendidikan</div>
+              <div className="space-y-1">
+                {p.riwayat_pendidikan.map((r, i) => (
+                  <div key={i} className="text-sm text-slate-700" data-testid={`detail-edu-${i}`}>• <b>{[r.jenjang, r.jurusan].filter(Boolean).join(" ")}</b>{r.institusi ? ` — ${r.institusi}` : ""}{r.tahun ? ` (${r.tahun})` : ""}</div>
+                ))}
+              </div>
+            </div>
+          )}
+          {(p.riwayat_pengalaman || []).length > 0 && (
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-rose-600 border-b border-slate-200 pb-1 mb-2">Riwayat Pengalaman Kerja</div>
+              <div className="space-y-1">
+                {p.riwayat_pengalaman.map((r, i) => (
+                  <div key={i} className="text-sm text-slate-700" data-testid={`detail-exp-${i}`}>• <b>{r.posisi || "-"}</b>{r.perusahaan ? ` di ${r.perusahaan}` : ""}{r.periode ? ` (${r.periode})` : ""}</div>
+                ))}
+              </div>
+            </div>
+          )}
           {p.catatan && (
             <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800"><b>Catatan:</b> {p.catatan}</div>
           )}
@@ -769,43 +827,60 @@ export function VerifySection() {
   const [kode, setKode] = useState("");
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
+  const rp = (v) => "Rp " + (Number(v) || 0).toLocaleString("id-ID");
   const check = async () => {
     if (!kode.trim()) return;
     setBusy(true); setResult(null);
-    try { const r = await api.post("/hrd/letters/verify", { kode }); setResult(r.data); }
-    catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+    try {
+      const rl = await api.post("/hrd/letters/verify", { kode });
+      if (rl.data.valid) { setResult({ kind: "letter", ...rl.data }); return; }
+      const rs = await api.post("/hrd/payslips/verify", { kode });
+      if (rs.data.valid) { setResult({ kind: "slip", ...rs.data }); return; }
+      setResult({ kind: "none", valid: false, message: rl.data.message || rs.data.message || "Kode tidak terdaftar" });
+    } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
   return (
     <div className="max-w-xl" data-testid="hrd-verify">
       <Card className="p-5">
         <div className="flex items-center gap-2 mb-1"><QrCode size={20} className="text-rose-600" />
-          <div className="text-sm font-bold text-slate-800">Cek Keaslian Surat</div></div>
-        <p className="text-xs text-slate-500 mb-4">Masukkan Kode Verifikasi yang tertera di surat (atau yang disebutkan penelepon). Sistem akan memeriksa apakah surat benar-benar diterbitkan oleh HRD.</p>
+          <div className="text-sm font-bold text-slate-800">Cek Keaslian Surat / Slip Gaji</div></div>
+        <p className="text-xs text-slate-500 mb-4">Masukkan Kode Verifikasi yang tertera di surat atau slip gaji (atau dari QR). Sistem memeriksa apakah dokumen benar diterbitkan HRD.</p>
         <div className="flex gap-2">
           <Input value={kode} onChange={(e) => setKode(e.target.value.toUpperCase())} placeholder="XXXX-XXXX-XXXX"
             className="font-mono tracking-wider" onKeyDown={(e) => e.key === "Enter" && check()} data-testid="verify-input" />
           <Button className="bg-rose-600 hover:bg-rose-700 shrink-0" onClick={check} disabled={busy} data-testid="verify-btn">{busy ? "Memeriksa…" : "Periksa"}</Button>
         </div>
-        {result && (
-          result.valid ? (
-            <div className="mt-4 bg-emerald-50 border border-emerald-200 rounded-md p-4" data-testid="verify-result-valid">
-              <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm mb-2"><SealCheck size={18} weight="fill" /> DOKUMEN ASLI — terdaftar di sistem</div>
-              <div className="text-xs text-slate-600 space-y-1">
-                <div><b>Nomor:</b> {result.letter.nomor}</div>
-                <div><b>Jenis:</b> {JENIS_LABEL[result.letter.jenis] || result.letter.jenis}</div>
-                <div><b>Nama:</b> {result.letter.nama} {result.letter.nik ? `(${result.letter.nik})` : ""}</div>
-                <div><b>Jabatan:</b> {result.letter.jabatan || "-"}</div>
-                <div><b>Diterbitkan:</b> {formatDateTimeWIB(result.letter.created_at)} oleh {result.letter.created_by}</div>
-              </div>
-              <div className="text-[11px] text-emerald-700 mt-2">Cocokkan data di atas dengan isi surat yang diterima. Jika berbeda, surat telah dimodifikasi.</div>
+        {result && result.kind === "slip" && (
+          <div className="mt-4 bg-emerald-50 border border-emerald-200 rounded-md p-4" data-testid="verify-result-slip">
+            <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm mb-2"><SealCheck size={18} weight="fill" /> SLIP GAJI ASLI — terdaftar di sistem</div>
+            <div className="text-xs text-slate-600 space-y-1">
+              <div><b>No. Dokumen:</b> {result.slip.no_dok}</div>
+              <div><b>Nama:</b> {result.slip.nama} {result.slip.nik ? `(${result.slip.nik})` : ""}</div>
+              <div><b>Periode:</b> {result.slip.periode}</div>
+              <div><b>Take Home Pay:</b> {rp(result.slip.take_home)}</div>
             </div>
-          ) : (
-            <div className="mt-4 bg-rose-50 border border-rose-200 rounded-md p-4 flex items-start gap-2" data-testid="verify-result-invalid">
-              <XCircle size={18} weight="fill" className="text-rose-600 shrink-0 mt-0.5" />
-              <div><div className="text-rose-700 font-bold text-sm">TIDAK TERDAFTAR</div>
-                <div className="text-xs text-rose-600 mt-1">{result.message}</div></div>
+            <div className="text-[11px] text-emerald-700 mt-2">Cocokkan nama & nominal di atas dengan slip yang diterima.</div>
+          </div>
+        )}
+        {result && result.kind === "letter" && (
+          <div className="mt-4 bg-emerald-50 border border-emerald-200 rounded-md p-4" data-testid="verify-result-valid">
+            <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm mb-2"><SealCheck size={18} weight="fill" /> DOKUMEN ASLI — terdaftar di sistem</div>
+            <div className="text-xs text-slate-600 space-y-1">
+              <div><b>Nomor:</b> {result.letter.nomor}</div>
+              <div><b>Jenis:</b> {JENIS_LABEL[result.letter.jenis] || result.letter.jenis}</div>
+              <div><b>Nama:</b> {result.letter.nama} {result.letter.nik ? `(${result.letter.nik})` : ""}</div>
+              <div><b>Jabatan:</b> {result.letter.jabatan || "-"}</div>
+              <div><b>Diterbitkan:</b> {formatDateTimeWIB(result.letter.created_at)} oleh {result.letter.created_by}</div>
             </div>
-          )
+            <div className="text-[11px] text-emerald-700 mt-2">Cocokkan data di atas dengan isi surat yang diterima. Jika berbeda, surat telah dimodifikasi.</div>
+          </div>
+        )}
+        {result && result.kind === "none" && (
+          <div className="mt-4 bg-rose-50 border border-rose-200 rounded-md p-4 flex items-start gap-2" data-testid="verify-result-invalid">
+            <XCircle size={18} weight="fill" className="text-rose-600 shrink-0 mt-0.5" />
+            <div><div className="text-rose-700 font-bold text-sm">TIDAK TERDAFTAR</div>
+              <div className="text-xs text-rose-600 mt-1">{result.message}</div></div>
+          </div>
         )}
       </Card>
     </div>

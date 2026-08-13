@@ -195,6 +195,12 @@ async def draft_letter(payload: DraftIn, current: dict = Depends(require_hrd_per
     prompt = (f"Buat draft {kind}.{sp_info}{emp_info}\n"
               f"Kronologi/poin dari HRD: {payload.kronologi.strip()}\n"
               "Struktur: pembuka, isi (uraikan kronologi secara profesional), penutup dengan konsekuensi/harapan yang wajar.")
+    if payload.jenis == "sp":
+        prompt = (f"Tuliskan URAIAN KASUS / PELANGGARAN untuk Surat Peringatan ({payload.tingkat_sp or 'SP'}) "
+                  "secara ringkas, formal, dan objektif dalam 2-4 kalimat. "
+                  "JANGAN memakai pembuka, salam, penutup, harapan, maupun tanda tangan — cukup deskripsi kasusnya saja "
+                  f"karena akan dimasukkan ke kolom 'Kasus' pada form Surat Peringatan resmi.{emp_info}\n"
+                  f"Kronologi/poin dari HRD: {payload.kronologi.strip()}")
     try:
         resp = await chat.send_message(UserMessage(text=prompt))
         draft = str(resp).strip()
@@ -241,15 +247,19 @@ READ_PROMPTS = {
             '"tanggal_lahir" (YYYY-MM-DD), "jenis_kelamin" ("Laki-laki"/"Perempuan"), "alamat" (gabungan lengkap), '
             '"agama", "status_kawin" ("Belum Kawin"/"Kawin"/"Cerai Hidup"/"Cerai Mati"), '
             '"keterangan" ("KTP a.n. <nama>"). Bila tidak terbaca, isi "".'),
-    "ijazah": ('Baca ijazah terlampir, keluarkan JSON: "keterangan" (ringkas: "Ijazah <jenjang> <jurusan> - <institusi>, lulus <tahun>"), '
-               '"pendidikan" ("<jenjang> <jurusan>"). Bila tidak terbaca, isi "".'),
-    "pengalaman": ('Baca surat pengalaman kerja/paklaring terlampir, keluarkan JSON: '
-                   '"keterangan" (ringkas: "Pengalaman: <posisi> di <perusahaan> (<periode>)"). Bila tidak terbaca, isi "".'),
+    "ijazah": ('Baca ijazah/transkrip terlampir, keluarkan JSON: "jenjang" (mis. "SD"/"SMP"/"SMA"/"SMK"/"D3"/"S1"/"S2"), '
+               '"jurusan", "institusi" (nama sekolah/kampus), "tahun" (tahun lulus, 4 digit), '
+               '"pendidikan" ("<jenjang> <jurusan>"), "keterangan" (ringkas 1 kalimat). Bila tidak terbaca, isi "".'),
+    "pengalaman": ('Baca surat pengalaman kerja/paklaring terlampir, keluarkan JSON: "posisi" (jabatan terakhir), '
+                   '"perusahaan", "periode" (mis. "2019 - 2022"), "keterangan" (ringkas 1 kalimat "Pengalaman: <posisi> di <perusahaan> (<periode>)"). Bila tidak terbaca, isi "".'),
     "kk": ('Baca Kartu Keluarga (KK) terlampir, keluarkan JSON: "no_kk" (16 digit nomor KK), '
            '"alamat" (alamat lengkap tertera di KK), "nama_ibu_kandung" (nama ibu bila terbaca), '
            '"status_kawin" ("Belum Kawin"/"Kawin"/"Cerai Hidup"/"Cerai Mati" untuk kepala keluarga bila terbaca), '
            '"keterangan" (ringkas: "KK No <no_kk> — <jumlah> anggota keluarga"). Bila tidak terbaca, isi "".'),
-    "lainnya": ('Identifikasi dokumen terlampir, keluarkan JSON: "keterangan" (deskripsi singkat 1 kalimat jenis & isi dokumen, bahasa Indonesia).'),
+    "lainnya": ('Identifikasi dokumen terlampir, keluarkan JSON: "jenis_dokumen" (mis. "NPWP"/"BPJS Ketenagakerjaan"/"BPJS Kesehatan"/"Sertifikat"/"SIM"/"Lainnya"), '
+                '"npwp" (nomor NPWP bila dokumen NPWP, else ""), "no_bpjs_tk" (nomor bila kartu BPJS Ketenagakerjaan, else ""), '
+                '"no_bpjs_kes" (nomor bila kartu BPJS Kesehatan, else ""), '
+                '"keterangan" (deskripsi singkat 1 kalimat jenis & isi dokumen, bahasa Indonesia). Bila tidak terbaca, isi "".'),
 }
 
 
@@ -288,6 +298,8 @@ class SaveLetterIn(BaseModel):
     employee_id: str = ""
     tingkat_sp: str = ""
     body: str
+    tgl_kejadian: str = ""   # khusus SP (ISO)
+    bagian: str = ""         # khusus SP (ISO)
 
 
 @router.post("/ai/preview-letter")
@@ -305,8 +317,10 @@ async def preview_ai_letter(payload: SaveLetterIn, current: dict = Depends(requi
         emp = await db.hrd_employees.find_one({"id": payload.employee_id, **NOT_DELETED_FILTER}, {"_id": 0})
     rec = {"id": "draft", "nomor": "DRAFT — BELUM DITERBITKAN", "jenis": payload.jenis,
            "kode": "BELUM-TERBIT", "tingkat_sp": payload.tingkat_sp, "body": payload.body.strip(),
+           "tgl_kejadian": payload.tgl_kejadian, "bagian": payload.bagian or (emp.get("dept", "") if emp else ""),
            "nama": emp.get("nama", "") if emp else "", "nik": emp.get("nik", "") if emp else "",
-           "dept": "", "jabatan": "", "tanggal_masuk": "", "tanggal_keluar": "", "keperluan": ""}
+           "dept": emp.get("dept", "") if emp else "", "jabatan": emp.get("jabatan", "") if emp else "",
+           "tanggal_masuk": "", "tanggal_keluar": "", "keperluan": ""}
     buf = _render_letter_pdf(rec)
     return SR(buf, media_type="application/pdf",
               headers={"Content-Disposition": 'inline; filename="preview_draft.pdf"'})
@@ -353,6 +367,7 @@ async def save_ai_letter(payload: SaveLetterIn, current: dict = Depends(require_
     rec = {
         "id": lid, "nomor": nomor, "jenis": payload.jenis, "kode": _letter_kode(lid, nomor),
         "tingkat_sp": payload.tingkat_sp, "body": payload.body.strip(),
+        "tgl_kejadian": payload.tgl_kejadian, "bagian": payload.bagian or (emp.get("dept", "") if emp else ""),
         "employee_id": emp["id"] if emp else "", "nama": emp.get("nama", "") if emp else "",
         "nik": emp.get("nik", "") if emp else "", "dept": emp.get("dept", "") if emp else "",
         "jabatan": emp.get("jabatan", "") if emp else "",

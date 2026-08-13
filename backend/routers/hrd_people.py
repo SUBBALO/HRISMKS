@@ -78,6 +78,8 @@ class PersonIn(BaseModel):
     kontak_darurat_hubungan: str = ""
     kontak_darurat_telp: str = ""
     catatan: str = ""
+    riwayat_pendidikan: list = []   # [{jenjang, jurusan, institusi, tahun}]
+    riwayat_pengalaman: list = []   # [{posisi, perusahaan, periode}]
 
 
 @router.get("/people")
@@ -362,6 +364,7 @@ def _masa_kerja_text(rec: dict) -> str:
 
 def _watermark_letter(canvas, doc, rec=None):
     from reportlab.lib.pagesizes import A4
+    is_sp = bool(rec and rec.get("jenis") == "sp")
     canvas.saveState()
     w, h = A4
     canvas.setFont("Helvetica-Bold", 40)
@@ -378,14 +381,25 @@ def _watermark_letter(canvas, doc, rec=None):
     canvas.line(20 * 2.8346, 34, w - 20 * 2.8346, 34)
     canvas.setFont("Helvetica", 6.8)
     canvas.setFillColorRGB(0.42, 0.45, 0.50)
-    canvas.drawString(20 * 2.8346, 24,
-                      "Dokumen diproses otomatis oleh sistem HRIS PT. Mitra Karya Sarana — sah tanpa tanda tangan basah. Keaslian dijamin kode verifikasi terenkripsi.")
+    if is_sp:
+        # Kode register dokumen ISO di kiri bawah (kecil)
+        canvas.setFont("Helvetica-Bold", 7)
+        canvas.drawString(20 * 2.8346, 24, "MKS-F-HRD-019")
+    else:
+        canvas.drawString(20 * 2.8346, 24,
+                          "Dokumen diproses otomatis oleh sistem HRIS PT. Mitra Karya Sarana — sah tanpa tanda tangan basah. Keaslian dijamin kode verifikasi terenkripsi.")
+    canvas.setFont("Helvetica", 6.8)
     canvas.drawRightString(w - 20 * 2.8346, 24, f"Hal. {canvas.getPageNumber()}")
     if rec and canvas.getPageNumber() > 1:
         canvas.setFont("Helvetica-Oblique", 7.5)
         canvas.drawCentredString(w / 2, h - 30,
                                  f"Lanjutan {LETTER_KINDS[rec['jenis']]['title'].title()} No. {rec['nomor']}")
     canvas.restoreState()
+
+
+def _sp_level_roman(t: str) -> str:
+    t = str(t or "").upper().replace("SP", "").strip()
+    return {"1": "I", "2": "II", "3": "III", "I": "I", "II": "II", "III": "III"}.get(t, "I")
 
 
 KOP_SURAT_PATH = Path(__file__).resolve().parent.parent / "assets" / "kop_surat.pdf"
@@ -409,7 +423,126 @@ def _merge_with_kop(content_buf: io.BytesIO) -> io.BytesIO:
     return out
 
 
+def _render_sp_iso_pdf(rec: dict) -> io.BytesIO:
+    """Surat Peringatan format ISO MKS-F-HRD-019 (bilingual, tanda tangan basah + QR)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from xml.sax.saxutils import escape
+
+    DARK = colors.HexColor("#1E293B"); GREY = colors.HexColor("#334155"); LINE = colors.HexColor("#94A3B8")
+    MUTE = colors.HexColor("#64748B")
+    styles = getSampleStyleSheet()
+    lbl = ParagraphStyle("lbl", parent=styles["Normal"], fontSize=9.5, leading=12, textColor=GREY)
+    val = ParagraphStyle("val", parent=styles["Normal"], fontSize=10, leading=13, textColor=DARK, fontName="Helvetica-Bold")
+    caseS = ParagraphStyle("case", parent=styles["Normal"], fontSize=9.5, leading=14, alignment=4, textColor=DARK)
+    ctr = ParagraphStyle("ctr", parent=styles["Normal"], fontSize=9, alignment=1, textColor=GREY)
+    en = lambda t: f" <font size=6 color='#64748B'>/ {t}</font>"  # noqa: E731
+
+    buf = io.BytesIO()
+    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=42 * mm, bottomMargin=20 * mm,
+                            leftMargin=20 * mm, rightMargin=20 * mm)
+    CW = 170 * mm
+    E = []
+
+    E.append(Paragraph("<u>SURAT PERINGATAN</u>", ParagraphStyle("t", parent=styles["Normal"], fontSize=14,
+                                                                 alignment=1, fontName="Helvetica-Bold", textColor=DARK)))
+    E.append(Spacer(1, 4))
+    E.append(Paragraph("WARNING LETTER", ParagraphStyle("t2", parent=styles["Normal"], fontSize=9, alignment=1, textColor=MUTE)))
+    E.append(Spacer(1, 2))
+    E.append(Paragraph(f"Nomor / Number : {rec['nomor']}", ctr))
+    E.append(Spacer(1, 12))
+
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    tgl_terbit = _fmt_date_id(rec.get("created_at")) if rec.get("created_at") else \
+        _fmt_date_id(_dt.now(_tz.utc).astimezone(_tz(_td(hours=7))).date().isoformat())
+    head = Table([
+        [Paragraph("Tanggal" + en("Date"), lbl), ":", tgl_terbit,
+         Paragraph("Bagian" + en("Dept"), lbl), ":", rec.get("bagian") or rec.get("dept") or "-"],
+    ], colWidths=[26 * mm, 4 * mm, 55 * mm, 22 * mm, 4 * mm, 59 * mm])
+    head.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 9.5), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                              ("TEXTCOLOR", (2, 0), (2, 0), DARK), ("TEXTCOLOR", (5, 0), (5, 0), DARK),
+                              ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
+    E.append(head)
+    E.append(Spacer(1, 6))
+
+    idt = Table([
+        [Paragraph("Nama" + en("Name"), lbl), ":", Paragraph(escape(rec.get("nama", "") or "-"), val)],
+        [Paragraph("Jabatan" + en("Designation"), lbl), ":", Paragraph(escape(rec.get("jabatan", "") or "-"), val)],
+        [Paragraph("No. Karyawan" + en("Emp. No"), lbl), ":", Paragraph(escape(rec.get("nik", "") or "-"), val)],
+    ], colWidths=[42 * mm, 5 * mm, 123 * mm])
+    idt.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5)]))
+    E.append(idt)
+    E.append(Spacer(1, 8))
+
+    E.append(Paragraph("Kasus" + en("Case") + " :", lbl))
+    E.append(Spacer(1, 2))
+    E.append(Paragraph(escape(rec.get("body") or rec.get("kasus") or "-").replace("\n", "<br/>"), caseS))
+    E.append(Spacer(1, 6))
+    tgl_kej = _fmt_date_id(rec.get("tgl_kejadian")) if rec.get("tgl_kejadian") else "-"
+    E.append(Paragraph("Tanggal Kejadian" + en("Incident Date") + f" : <b>{tgl_kej}</b>", lbl))
+    E.append(Spacer(1, 8))
+
+    E.append(Paragraph("Pernyataan" + en("Declaration") + " :", lbl))
+    E.append(Spacer(1, 2))
+    dl = Table([[""], [""], [""]], colWidths=[CW], rowHeights=[9 * mm, 9 * mm, 9 * mm])
+    dl.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.4, LINE)]))
+    E.append(dl)
+    E.append(Spacer(1, 8))
+
+    roman = _sp_level_roman(rec.get("tingkat_sp"))
+    def lvl_cell(r):
+        sel = (r == roman)
+        return Paragraph(f"<b>{r}</b>", ParagraphStyle("lc", parent=styles["Normal"], fontSize=11, alignment=1,
+                                                       textColor=colors.white if sel else GREY))
+    lvl = Table([[Paragraph("Surat Peringatan" + en("Warning Letter") + " :", lbl),
+                  lvl_cell("I"), lvl_cell("II"), lvl_cell("III")]],
+                colWidths=[92 * mm, 26 * mm, 26 * mm, 26 * mm])
+    ls = [("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("BOX", (1, 0), (3, 0), 0.6, LINE),
+          ("INNERGRID", (1, 0), (3, 0), 0.6, LINE), ("TOPPADDING", (1, 0), (3, 0), 5), ("BOTTOMPADDING", (1, 0), (3, 0), 5)]
+    sel_col = {"I": 1, "II": 2, "III": 3}[roman]
+    ls.append(("BACKGROUND", (sel_col, 0), (sel_col, 0), DARK))
+    lvl.setStyle(TableStyle(ls))
+    E.append(lvl)
+    E.append(Spacer(1, 16))
+
+    # Blok tanda tangan basah (Employee / Dept Head / HRD-MR)
+    sig = Table([
+        [Paragraph("Declared By,", ctr), Paragraph("Issued By,", ctr), Paragraph("Acknowledged By,", ctr)],
+        ["", "", ""],
+        [Paragraph("(______________)", ctr), Paragraph("(______________)", ctr), Paragraph("(______________)", ctr)],
+        [Paragraph("<b>Employee</b>" + en("Karyawan"), ctr), Paragraph("<b>Dept Head</b>" + en("Ka. Bagian"), ctr),
+         Paragraph("<b>HRD / MR</b>", ctr)],
+    ], colWidths=[CW / 3] * 3, rowHeights=[7 * mm, 16 * mm, 6 * mm, 7 * mm])
+    sig.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+    E.append(sig)
+    E.append(Spacer(1, 10))
+
+    qr_flow = Image(_letter_qr(rec), width=20 * mm, height=20 * mm)
+    ver_note = Paragraph(
+        f"<b>Verifikasi Keaslian / Authenticity</b> — Kode: <b>{rec['kode']}</b><br/>"
+        "Pindai QR lalu cocokkan dengan isi surat. Konfirmasi keaslian: hubungi HRD PT. Mitra Karya Sarana.",
+        ParagraphStyle("vn", parent=styles["Normal"], fontSize=7.5, leading=10.5, textColor=GREY))
+    grid = Table([[qr_flow, ver_note]], colWidths=[26 * mm, CW - 26 * mm])
+    grid.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("BOX", (0, 0), (-1, -1), 0.5, LINE),
+                              ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+                              ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                              ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6)]))
+    E.append(grid)
+    E.append(Spacer(1, 4))
+    E.append(Paragraph("Cc : Personal File", ParagraphStyle("cc", parent=styles["Normal"], fontSize=8, textColor=MUTE)))
+
+    deco = lambda canvas, doc: _watermark_letter(canvas, doc, rec)  # noqa: E731
+    pdf.build(E, onFirstPage=deco, onLaterPages=deco)
+    buf.seek(0)
+    return buf
+
+
 def _render_letter_pdf(rec: dict) -> io.BytesIO:
+    if rec.get("jenis") == "sp":
+        return _merge_with_kop(_render_sp_iso_pdf(rec))
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib import colors

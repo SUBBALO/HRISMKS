@@ -7,7 +7,7 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Sparkle, Trash, UploadSimple, FileText } from "@phosphor-icons/react";
+import { Sparkle, Trash, UploadSimple, FileText, Plus } from "@phosphor-icons/react";
 
 const errMsg = (e) => formatApiErrorDetail(e?.response?.data?.detail) || e?.message || "Terjadi kesalahan";
 
@@ -27,6 +27,7 @@ const FORM_INIT = {
   dept: "", jabatan: "", status_karyawan: "", tanggal_masuk: "", tanggal_keluar: "",
   bank: "", no_rekening: "", npwp: "", no_bpjs_tk: "", no_bpjs_kes: "",
   kontak_darurat_nama: "", kontak_darurat_hubungan: "", kontak_darurat_telp: "", catatan: "",
+  riwayat_pendidikan: [], riwayat_pengalaman: [],
 };
 
 function Sec({ children }) {
@@ -40,6 +41,9 @@ export default function OnboardDialog({ open, onClose, onDone }) {
   const [saving, setSaving] = useState(false);
   const set = (k) => (e) => setF((p) => ({ ...p, [k]: e?.target ? e.target.value : e }));
   const reset = () => { setF(FORM_INIT); setDocs([]); };
+  const addRow = (key, blank) => setF((p) => ({ ...p, [key]: [...(p[key] || []), blank] }));
+  const setRow = (key, i, k, v) => setF((p) => { const a = [...(p[key] || [])]; a[i] = { ...a[i], [k]: v }; return { ...p, [key]: a }; });
+  const rmRow = (key, i) => setF((p) => ({ ...p, [key]: (p[key] || []).filter((_, j) => j !== i) }));
 
   const addFiles = async (cat, files) => {
     const list = Array.from(files || []).filter(Boolean);
@@ -73,9 +77,32 @@ export default function OnboardDialog({ open, onClose, onDone }) {
           status_kawin: prev.status_kawin || p.status_kawin || "",
         }));
         setDocs((d) => [...d.filter((x) => x.kategori !== "kk"), { file, docType: cat.docType, kategori: cat.key, keterangan: p.keterangan || "" }]);
-      } else {
-        if (cat.key === "ijazah" && p.pendidikan) setF((prev) => ({ ...prev, pendidikan: prev.pendidikan || p.pendidikan }));
+      } else if (cat.key === "ijazah") {
+        setF((prev) => ({
+          ...prev,
+          pendidikan: prev.pendidikan || p.pendidikan || "",
+          jurusan: prev.jurusan || p.jurusan || "",
+          riwayat_pendidikan: [...(prev.riwayat_pendidikan || []),
+            { jenjang: p.jenjang || "", jurusan: p.jurusan || "", institusi: p.institusi || "", tahun: p.tahun || "" }],
+        }));
         setDocs((d) => [...d, { file, docType: cat.docType, kategori: cat.key, keterangan: p.keterangan || "" }]);
+      } else if (cat.key === "pengalaman") {
+        setF((prev) => ({
+          ...prev,
+          riwayat_pengalaman: [...(prev.riwayat_pengalaman || []),
+            { posisi: p.posisi || "", perusahaan: p.perusahaan || "", periode: p.periode || "" }],
+        }));
+        setDocs((d) => [...d, { file, docType: cat.docType, kategori: cat.key, keterangan: p.keterangan || "" }]);
+      } else {
+        setF((prev) => ({
+          ...prev,
+          npwp: prev.npwp || p.npwp || "",
+          no_bpjs_tk: prev.no_bpjs_tk || p.no_bpjs_tk || "",
+          no_bpjs_kes: prev.no_bpjs_kes || p.no_bpjs_kes || "",
+        }));
+        const known = ["NPWP", "BPJS Ketenagakerjaan", "BPJS Kesehatan", "Sertifikat"];
+        const dt = known.includes(p.jenis_dokumen) ? p.jenis_dokumen : cat.docType;
+        setDocs((d) => [...d, { file, docType: dt, kategori: cat.key, keterangan: p.keterangan || "" }]);
       }
       toast.success(`${cat.label} terbaca`);
     } catch (e) { toast.error(errMsg(e)); } finally { setReading(""); }
@@ -187,6 +214,51 @@ export default function OnboardDialog({ open, onClose, onDone }) {
           {fld("kontak_darurat_nama", "Nama Kontak Darurat")}
           {fld("kontak_darurat_hubungan", "Hubungan", { placeholder: "mis. Istri / Orang Tua" })}
           {fld("kontak_darurat_telp", "Telp Kontak Darurat")}
+        </div>
+
+        {/* Tabel Riwayat Pendidikan (dari Ijazah) */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-rose-600">Riwayat Pendidikan (dari Ijazah)</div>
+            <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => addRow("riwayat_pendidikan", { jenjang: "", jurusan: "", institusi: "", tahun: "" })} data-testid="onboard-add-edu"><Plus size={13} /> Baris</Button>
+          </div>
+          {(f.riwayat_pendidikan || []).length === 0 ? (
+            <div className="text-[11px] text-slate-400 border border-dashed border-slate-200 rounded-md text-center py-2">Upload Ijazah agar terisi otomatis, atau tambah manual.</div>
+          ) : (
+            <div className="space-y-1.5">
+              {(f.riwayat_pendidikan || []).map((r, i) => (
+                <div key={i} className="grid grid-cols-12 gap-1.5 items-center" data-testid={`onboard-edu-${i}`}>
+                  <Input className="h-8 text-xs col-span-2" value={r.jenjang} placeholder="Jenjang" onChange={(e) => setRow("riwayat_pendidikan", i, "jenjang", e.target.value)} />
+                  <Input className="h-8 text-xs col-span-4" value={r.jurusan} placeholder="Jurusan" onChange={(e) => setRow("riwayat_pendidikan", i, "jurusan", e.target.value)} />
+                  <Input className="h-8 text-xs col-span-4" value={r.institusi} placeholder="Institusi" onChange={(e) => setRow("riwayat_pendidikan", i, "institusi", e.target.value)} />
+                  <Input className="h-8 text-xs col-span-1" value={r.tahun} placeholder="Thn" onChange={(e) => setRow("riwayat_pendidikan", i, "tahun", e.target.value)} />
+                  <Trash size={14} className="text-rose-500 cursor-pointer col-span-1 mx-auto" onClick={() => rmRow("riwayat_pendidikan", i)} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Tabel Riwayat Pengalaman Kerja */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-rose-600">Riwayat Pengalaman Kerja</div>
+            <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => addRow("riwayat_pengalaman", { posisi: "", perusahaan: "", periode: "" })} data-testid="onboard-add-exp"><Plus size={13} /> Baris</Button>
+          </div>
+          {(f.riwayat_pengalaman || []).length === 0 ? (
+            <div className="text-[11px] text-slate-400 border border-dashed border-slate-200 rounded-md text-center py-2">Upload dokumen Pengalaman Kerja agar terisi otomatis, atau tambah manual.</div>
+          ) : (
+            <div className="space-y-1.5">
+              {(f.riwayat_pengalaman || []).map((r, i) => (
+                <div key={i} className="grid grid-cols-12 gap-1.5 items-center" data-testid={`onboard-exp-${i}`}>
+                  <Input className="h-8 text-xs col-span-4" value={r.posisi} placeholder="Posisi/Jabatan" onChange={(e) => setRow("riwayat_pengalaman", i, "posisi", e.target.value)} />
+                  <Input className="h-8 text-xs col-span-4" value={r.perusahaan} placeholder="Perusahaan" onChange={(e) => setRow("riwayat_pengalaman", i, "perusahaan", e.target.value)} />
+                  <Input className="h-8 text-xs col-span-3" value={r.periode} placeholder="Periode (2019-2022)" onChange={(e) => setRow("riwayat_pengalaman", i, "periode", e.target.value)} />
+                  <Trash size={14} className="text-rose-500 cursor-pointer col-span-1 mx-auto" onClick={() => rmRow("riwayat_pengalaman", i)} />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="text-[11px] text-slate-400">Data hasil pembacaan AI mohon diperiksa kembali sebelum disimpan. Data yang belum lengkap bisa dilengkapi nanti lewat tombol Edit.</div>
 

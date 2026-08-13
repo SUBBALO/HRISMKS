@@ -150,6 +150,8 @@ export function DraftAiSection({ can }) {
   const [jenis, setJenis] = useState("sp");
   const [empId, setEmpId] = useState("");
   const [tingkat, setTingkat] = useState("SP1");
+  const [tglKejadian, setTglKejadian] = useState("");
+  const [bagian, setBagian] = useState("");
   const [kronologi, setKronologi] = useState("");
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -172,7 +174,7 @@ export function DraftAiSection({ can }) {
   };
   const preview = async () => {
     if (!draft.trim()) return;
-    try { await openBlob("/hrd/ai/preview-letter", "post", { jenis, employee_id: empId, tingkat_sp: jenis === "sp" ? tingkat : "", body: draft }); }
+    try { await openBlob("/hrd/ai/preview-letter", "post", { jenis, employee_id: empId, tingkat_sp: jenis === "sp" ? tingkat : "", body: draft, tgl_kejadian: jenis === "sp" ? tglKejadian : "", bagian: jenis === "sp" ? bagian : "" }); }
     catch (e) { toast.error(errMsg(e)); }
   };
   const saveEdit = async () => {
@@ -188,6 +190,7 @@ export function DraftAiSection({ can }) {
   const JLABEL = { skk: "Ket. Kerja", paklaring: "Pengalaman", sp: "SP", panggilan: "Panggilan", memo: "Memo", pengumuman: "Pengumuman" };
 
   useEffect(() => { api.get("/hrd/people").then((r) => setPeople(r.data.items || [])).catch(() => {}); }, []);
+  useEffect(() => { const p = people.find((x) => x.id === empId); if (p) setBagian((prev) => prev || p.dept || ""); }, [empId, people]);
 
   const generate = async () => {
     if (!kronologi.trim()) { toast.error("Isi kronologi/poin singkat dulu"); return; }
@@ -203,7 +206,7 @@ export function DraftAiSection({ can }) {
     if (!draft.trim()) return;
     setSaving(true);
     try {
-      const r = await api.post("/hrd/ai/save-letter", { jenis, employee_id: empId, tingkat_sp: jenis === "sp" ? tingkat : "", body: draft });
+      const r = await api.post("/hrd/ai/save-letter", { jenis, employee_id: empId, tingkat_sp: jenis === "sp" ? tingkat : "", body: draft, tgl_kejadian: jenis === "sp" ? tglKejadian : "", bagian: jenis === "sp" ? bagian : "" });
       toast.success(`Surat ${r.data.nomor} diterbitkan${jenis === "sp" && empId ? " + tercatat di Riwayat Karir" : ""}`);
       await openBlob(`/hrd/letters/${r.data.id}/pdf`);
       setDraft(""); loadLetters();
@@ -226,6 +229,14 @@ export function DraftAiSection({ can }) {
                 <SelectTrigger data-testid="draft-tingkat"><SelectValue /></SelectTrigger>
                 <SelectContent>{["SP1", "SP2", "SP3"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
               </Select></div>
+          )}
+          {jenis === "sp" && (
+            <div><Label className="text-xs text-slate-500">Tanggal Kejadian</Label>
+              <Input type="date" value={tglKejadian} onChange={(e) => setTglKejadian(e.target.value)} data-testid="draft-tglkejadian" /></div>
+          )}
+          {jenis === "sp" && (
+            <div><Label className="text-xs text-slate-500">Bagian / Dept</Label>
+              <Input value={bagian} onChange={(e) => setBagian(e.target.value)} placeholder="mis. Produksi" data-testid="draft-bagian" /></div>
           )}
           <div className="col-span-2"><Label className="text-xs text-slate-500">Karyawan Terkait (opsional)</Label>
             <Select value={empId || "none"} onValueChange={(v) => setEmpId(v === "none" ? "" : v)}>

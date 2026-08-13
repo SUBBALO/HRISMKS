@@ -2,6 +2,8 @@
 Portal dikunci PIN — bahkan admin harus masukkan PIN untuk melihat data gaji."""
 import io
 import uuid
+import hashlib
+import hmac
 import smtplib
 import ssl
 from datetime import datetime, timezone, timedelta
@@ -940,6 +942,36 @@ def _terbilang_rupiah(n) -> str:
     return " ".join(w.capitalize() for w in words.split()) + " Rupiah"
 
 
+def _slip_no_dok(slip: dict) -> str:
+    return f"SG/{slip.get('period_year')}/{int(slip.get('period_month') or 0):02d}/{(slip.get('nik') or '-').replace(' ', '')}"
+
+
+def _slip_kode(slip: dict) -> str:
+    """Kode verifikasi HMAC dari id + periode + take_home (stabil per slip)."""
+    base = f"{slip.get('id')}|{slip.get('period_month')}-{slip.get('period_year')}|{int(round(float(slip.get('take_home') or 0)))}"
+    h = hmac.new(JWT_SECRET.encode(), base.encode(), hashlib.sha256).hexdigest()[:12].upper()
+    return f"{h[:4]}-{h[4:8]}-{h[8:]}"
+
+
+def _slip_qr(slip: dict, no_dok: str, kode: str):
+    import qrcode
+    per = f"{BULAN_ID.get(slip.get('period_month'), slip.get('period_month'))} {slip.get('period_year')}"
+    lines = [
+        "PT. MITRA KARYA SARANA — SLIP GAJI",
+        f"No: {no_dok}",
+        f"Nama: {slip.get('nama','')}" + (f" | NIK: {slip.get('nik')}" if slip.get("nik") else ""),
+        f"Periode: {per}",
+        f"Take Home: Rp {int(round(float(slip.get('take_home') or 0))):,}".replace(",", "."),
+        f"Kode Verifikasi: {kode}",
+        "Cek keaslian: hubungi HRD MKS",
+    ]
+    img = qrcode.make("\n".join(lines), box_size=8, border=2)
+    b = io.BytesIO()
+    img.save(b, format="PNG")
+    b.seek(0)
+    return b
+
+
 def _watermark(canvas, doc):
     """Watermark diagonal anti-penyalahgunaan: halaman tidak bisa dipakai ulang sebagai kertas kosong."""
     from reportlab.lib.pagesizes import A4
@@ -1113,22 +1145,28 @@ def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
         elems.append(Spacer(1, 5))
         elems.append(Paragraph(f"Catatan : {slip['notes']}", small))
 
-    # Blok validasi digital (tanpa tanda tangan)
+    # Blok validasi digital + QR (tanpa tanda tangan)
     elems.append(Spacer(1, 12))
     tgl = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7)))
     tgl_str = f"{tgl.day} {BULAN_ID.get(tgl.month)} {tgl.year}"
     stamp = tgl.strftime("%d-%m-%Y %H:%M") + " WIB"
-    no_dok = f"SG/{slip.get('period_year')}/{int(slip.get('period_month') or 0):02d}/{(slip.get('nik') or '-').replace(' ', '')}"
+    no_dok = _slip_no_dok(slip)
+    kode = slip.get("kode") or _slip_kode(slip)
+    from reportlab.platypus import Image as _Img
     note_style = ParagraphStyle("nv", parent=styles["Normal"], fontSize=7.5, textColor=GREY, leading=10)
-    valid_tbl = Table([
-        [Paragraph(f"<b>No. Dokumen</b> : {no_dok}", note_style),
-         Paragraph(f"Diterbitkan secara elektronik oleh <b>HRD — PT. Mitra Karya Sarana</b><br/>Batam, {tgl_str} ({stamp})",
-                   ParagraphStyle("nvr", parent=note_style, alignment=2))],
-    ], colWidths=[CW / 2, CW / 2])
+    qr_img = _Img(_slip_qr(slip, no_dok, kode), width=22 * mm, height=22 * mm)
+    info_cell = Paragraph(
+        f"<b>No. Dokumen</b> : {no_dok}<br/>"
+        f"<b>Kode Verifikasi</b> : {kode}<br/>"
+        f"Diterbitkan elektronik oleh <b>HRD — PT. Mitra Karya Sarana</b><br/>"
+        f"Batam, {tgl_str} ({stamp})<br/>"
+        "<i>Pindai QR untuk verifikasi nama & nominal. Konfirmasi keaslian: hubungi HRD.</i>",
+        note_style)
+    valid_tbl = Table([[qr_img, info_cell]], colWidths=[26 * mm, CW - 26 * mm])
     valid_tbl.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.5, LINE),
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
     ]))
@@ -1148,9 +1186,31 @@ async def payslip_pdf(sid: str, current: dict = Depends(require_hrd_perm("hrd_sl
     slip = await db.hrd_payslips.find_one({"id": sid, **NOT_DELETED_FILTER}, {"_id": 0})
     if not slip:
         raise HTTPException(status_code=404, detail="Slip tidak ditemukan")
+    if not slip.get("kode"):
+        slip["kode"] = _slip_kode(slip)
+        await db.hrd_payslips.update_one({"id": sid}, {"$set": {"kode": slip["kode"]}})
     buf = _render_slip_pdf(slip, printed_by=current.get("name") or current.get("username", ""))
     fname = f"SlipGaji_{slip.get('nama','')}_{slip.get('period_month')}_{slip.get('period_year')}.pdf".replace(" ", "_")
     return StreamingResponse(buf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{fname}"'})
+
+
+class SlipVerifyIn(BaseModel):
+    kode: str
+
+
+@router.post("/payslips/verify")
+async def verify_payslip(payload: SlipVerifyIn, current: dict = Depends(require_hrd_perm("hrd_dokumen", "view"))):
+    raw = "".join(ch for ch in payload.kode.upper() if ch.isalnum())
+    if len(raw) != 12:
+        return {"valid": False, "message": "Format kode tidak valid (12 karakter)"}
+    kode = f"{raw[:4]}-{raw[4:8]}-{raw[8:]}"
+    slip = await db.hrd_payslips.find_one({"kode": kode, **NOT_DELETED_FILTER}, {"_id": 0})
+    if not slip or _slip_kode(slip) != kode:
+        return {"valid": False, "message": "Kode slip gaji tidak terdaftar / tidak sah"}
+    per = f"{BULAN_ID.get(slip.get('period_month'), slip.get('period_month'))} {slip.get('period_year')}"
+    return {"valid": True, "slip": {
+        "no_dok": _slip_no_dok(slip), "nama": slip.get("nama", ""), "nik": slip.get("nik", ""),
+        "periode": per, "take_home": slip.get("take_home"), "kode": kode}}
 
 
 # Kolom penghasilan & potongan sesuai template slip gaji MKS

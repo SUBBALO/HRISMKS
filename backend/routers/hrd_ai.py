@@ -245,7 +245,8 @@ async def ocr_ktp(file: UploadFile = File(...), current: dict = Depends(require_
 READ_PROMPTS = {
     "ktp": ('Baca KTP terlampir, keluarkan JSON: "nik_ktp" (16 digit), "nama", "tempat_lahir", '
             '"tanggal_lahir" (YYYY-MM-DD), "jenis_kelamin" ("Laki-laki"/"Perempuan"), "alamat" (gabungan lengkap), '
-            '"agama", "status_kawin" ("Belum Kawin"/"Kawin"/"Cerai Hidup"/"Cerai Mati"), '
+            '"agama" (HARUS salah satu persis: "Islam"/"Kristen"/"Katolik"/"Hindu"/"Buddha"/"Konghucu"), '
+            '"status_kawin" ("Belum Kawin"/"Kawin"/"Cerai Hidup"/"Cerai Mati"), '
             '"keterangan" ("KTP a.n. <nama>"). Bila tidak terbaca, isi "".'),
     "ijazah": ('Baca ijazah/transkrip terlampir, keluarkan JSON: "jenjang" (mis. "SD"/"SMP"/"SMA"/"SMK"/"D3"/"S1"/"S2"), '
                '"jurusan", "institusi" (nama sekolah/kampus), "tahun" (tahun lulus, 4 digit), '
@@ -253,9 +254,11 @@ READ_PROMPTS = {
     "pengalaman": ('Baca surat pengalaman kerja/paklaring terlampir, keluarkan JSON: "posisi" (jabatan terakhir), '
                    '"perusahaan", "periode" (mis. "2019 - 2022"), "keterangan" (ringkas 1 kalimat "Pengalaman: <posisi> di <perusahaan> (<periode>)"). Bila tidak terbaca, isi "".'),
     "kk": ('Baca Kartu Keluarga (KK) terlampir, keluarkan JSON: "no_kk" (16 digit nomor KK), '
-           '"alamat" (alamat lengkap tertera di KK), "nama_ibu_kandung" (nama ibu bila terbaca), '
+           '"alamat" (alamat lengkap tertera di KK), "nama_kepala_keluarga", "nama_ibu_kandung" (bila terbaca), '
            '"status_kawin" ("Belum Kawin"/"Kawin"/"Cerai Hidup"/"Cerai Mati" untuk kepala keluarga bila terbaca), '
-           '"keterangan" (ringkas: "KK No <no_kk> — <jumlah> anggota keluarga"). Bila tidak terbaca, isi "".'),
+           '"anggota_keluarga" (array objek untuk SETIAP anggota keluarga di KK, tiap objek: '
+           '{"nama","nik","hubungan" (mis. Kepala Keluarga/Istri/Anak),"tempat_lahir","tanggal_lahir" (YYYY-MM-DD),"pekerjaan"}), '
+           '"keterangan" (ringkas: "KK No <no_kk> — <jumlah> anggota keluarga"). Bila tidak terbaca, isi "" atau [].'),
     "lainnya": ('Identifikasi dokumen terlampir, keluarkan JSON: "jenis_dokumen" (mis. "NPWP"/"BPJS Ketenagakerjaan"/"BPJS Kesehatan"/"Sertifikat"/"SIM"/"Lainnya"), '
                 '"npwp" (nomor NPWP bila dokumen NPWP, else ""), "no_bpjs_tk" (nomor bila kartu BPJS Ketenagakerjaan, else ""), '
                 '"no_bpjs_kes" (nomor bila kartu BPJS Kesehatan, else ""), '

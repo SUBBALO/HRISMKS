@@ -96,7 +96,7 @@ const EMPTY_PERSON = {
   dept: "", jabatan: "", status_karyawan: "", tanggal_masuk: "", tanggal_keluar: "",
   bank: "", no_rekening: "", npwp: "", no_bpjs_tk: "", no_bpjs_kes: "",
   kontak_darurat_nama: "", kontak_darurat_hubungan: "", kontak_darurat_telp: "", catatan: "",
-  riwayat_pendidikan: [], riwayat_pengalaman: [],
+  riwayat_pendidikan: [], riwayat_pengalaman: [], anggota_keluarga: [],
 };
 
 function PeopleSection({ can }) {
@@ -326,6 +326,24 @@ function PersonDialog({ person, onClose, onSaved }) {
             ))}
           </div>
         </div>
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-rose-600">Data Keluarga (Kartu Keluarga)</div>
+            <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => addRow("anggota_keluarga", { nama: "", hubungan: "", nik: "", tanggal_lahir: "", pekerjaan: "" })} data-testid="person-add-kel"><Plus size={13} /> Baris</Button>
+          </div>
+          <div className="space-y-1.5">
+            {(f.anggota_keluarga || []).map((r, i) => (
+              <div key={i} className="flex items-center gap-1.5" data-testid={`person-kel-${i}`}>
+                <Input className="h-8 text-xs flex-[3]" value={r.nama || ""} placeholder="Nama" onChange={(e) => setRow("anggota_keluarga", i, "nama", e.target.value)} />
+                <Input className="h-8 text-xs flex-[2]" value={r.hubungan || ""} placeholder="Hubungan" onChange={(e) => setRow("anggota_keluarga", i, "hubungan", e.target.value)} />
+                <Input className="h-8 text-xs flex-[3]" value={r.nik || ""} placeholder="NIK" onChange={(e) => setRow("anggota_keluarga", i, "nik", e.target.value)} />
+                <Input className="h-8 text-xs flex-[2]" type="date" value={r.tanggal_lahir || ""} onChange={(e) => setRow("anggota_keluarga", i, "tanggal_lahir", e.target.value)} />
+                <Input className="h-8 text-xs flex-[2]" value={r.pekerjaan || ""} placeholder="Pekerjaan" onChange={(e) => setRow("anggota_keluarga", i, "pekerjaan", e.target.value)} />
+                <Trash size={14} className="text-rose-500 cursor-pointer shrink-0" onClick={() => rmRow("anggota_keluarga", i)} />
+              </div>
+            ))}
+          </div>
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Batal</Button>
           <Button className="bg-rose-600 hover:bg-rose-700" onClick={save} disabled={busy} data-testid="person-save">{busy ? "Menyimpan…" : "Simpan"}</Button>
@@ -454,6 +472,16 @@ function PersonDetailDialog({ person, docTypes, can, onClose, onEdit }) {
               <div className="space-y-1">
                 {p.riwayat_pengalaman.map((r, i) => (
                   <div key={i} className="text-sm text-slate-700" data-testid={`detail-exp-${i}`}>• <b>{r.posisi || "-"}</b>{r.perusahaan ? ` di ${r.perusahaan}` : ""}{r.periode ? ` (${r.periode})` : ""}</div>
+                ))}
+              </div>
+            </div>
+          )}
+          {(p.anggota_keluarga || []).length > 0 && (
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-rose-600 border-b border-slate-200 pb-1 mb-2">Data Keluarga (Kartu Keluarga)</div>
+              <div className="space-y-1">
+                {p.anggota_keluarga.map((r, i) => (
+                  <div key={i} className="text-sm text-slate-700" data-testid={`detail-kel-${i}`}>• <b>{r.nama || "-"}</b>{r.hubungan ? ` — ${r.hubungan}` : ""}{r.nik ? ` (NIK: ${r.nik})` : ""}{r.tanggal_lahir ? `, lahir ${formatDateID(r.tanggal_lahir)}` : ""}{r.pekerjaan ? `, ${r.pekerjaan}` : ""}</div>
                 ))}
               </div>
             </div>

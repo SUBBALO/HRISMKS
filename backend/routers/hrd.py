@@ -987,19 +987,8 @@ def _slip_qr(slip: dict, no_dok: str, kode: str):
 
 
 def _watermark(canvas, doc):
-    """Watermark diagonal anti-penyalahgunaan: halaman tidak bisa dipakai ulang sebagai kertas kosong."""
+    """Footer 1 baris (tanpa watermark diagonal)."""
     from reportlab.lib.pagesizes import A4
-    canvas.saveState()
-    w, h = A4
-    canvas.setFont("Helvetica-Bold", 42)
-    canvas.setFillColorRGB(0.55, 0.60, 0.67, alpha=0.08)
-    canvas.translate(w / 2, h / 2)
-    canvas.rotate(45)
-    canvas.drawCentredString(0, 80, "SLIP GAJI • RAHASIA")
-    canvas.drawCentredString(0, -40, "PT. MITRA KARYA SARANA")
-    canvas.drawCentredString(0, -160, "SLIP GAJI • RAHASIA")
-    canvas.restoreState()
-    # Footer tetap 1 baris
     canvas.saveState()
     w2, h2 = A4
     canvas.setStrokeColorRGB(0.80, 0.84, 0.88)

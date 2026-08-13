@@ -27,8 +27,11 @@ const FORM_INIT = {
   dept: "", jabatan: "", status_karyawan: "", tanggal_masuk: "", tanggal_keluar: "",
   bank: "", no_rekening: "", npwp: "", no_bpjs_tk: "", no_bpjs_kes: "",
   kontak_darurat_nama: "", kontak_darurat_hubungan: "", kontak_darurat_telp: "", catatan: "",
-  riwayat_pendidikan: [], riwayat_pengalaman: [],
+  riwayat_pendidikan: [], riwayat_pengalaman: [], anggota_keluarga: [],
 };
+
+const AGAMA_MAP = { islam: "Islam", kristen: "Kristen", katolik: "Katolik", hindu: "Hindu", buddha: "Buddha", budha: "Buddha", konghucu: "Konghucu", "kong hu cu": "Konghucu" };
+const normAgama = (v) => AGAMA_MAP[String(v || "").trim().toLowerCase()] || (v || "");
 
 function Sec({ children }) {
   return <div className="col-span-2 md:col-span-3 mt-1 pb-1 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-rose-600">{children}</div>;
@@ -64,8 +67,9 @@ export default function OnboardDialog({ open, onClose, onDone }) {
       if (cat.key === "ktp") {
         setF((prev) => ({
           ...prev,
-          ...Object.fromEntries(["nik_ktp", "nama", "tempat_lahir", "tanggal_lahir", "jenis_kelamin", "alamat", "agama", "status_kawin"]
+          ...Object.fromEntries(["nik_ktp", "nama", "tempat_lahir", "tanggal_lahir", "jenis_kelamin", "alamat", "status_kawin"]
             .map((k) => [k, p[k] || prev[k]])),
+          agama: normAgama(p.agama) || prev.agama,
         }));
         setDocs((d) => [...d.filter((x) => x.kategori !== "ktp"), { file, docType: cat.docType, kategori: cat.key, keterangan: p.keterangan || "" }]);
       } else if (cat.key === "kk") {
@@ -75,6 +79,7 @@ export default function OnboardDialog({ open, onClose, onDone }) {
           alamat: prev.alamat || p.alamat || "",
           nama_ibu_kandung: prev.nama_ibu_kandung || p.nama_ibu_kandung || "",
           status_kawin: prev.status_kawin || p.status_kawin || "",
+          anggota_keluarga: (Array.isArray(p.anggota_keluarga) && p.anggota_keluarga.length) ? p.anggota_keluarga : (prev.anggota_keluarga || []),
         }));
         setDocs((d) => [...d.filter((x) => x.kategori !== "kk"), { file, docType: cat.docType, kategori: cat.key, keterangan: p.keterangan || "" }]);
       } else if (cat.key === "ijazah") {
@@ -255,6 +260,30 @@ export default function OnboardDialog({ open, onClose, onDone }) {
                   <Input className="h-8 text-xs col-span-4" value={r.perusahaan} placeholder="Perusahaan" onChange={(e) => setRow("riwayat_pengalaman", i, "perusahaan", e.target.value)} />
                   <Input className="h-8 text-xs col-span-3" value={r.periode} placeholder="Periode (2019-2022)" onChange={(e) => setRow("riwayat_pengalaman", i, "periode", e.target.value)} />
                   <Trash size={14} className="text-rose-500 cursor-pointer col-span-1 mx-auto" onClick={() => rmRow("riwayat_pengalaman", i)} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Tabel Data Keluarga (dari KK) */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-rose-600">Data Keluarga (dari Kartu Keluarga)</div>
+            <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => addRow("anggota_keluarga", { nama: "", hubungan: "", nik: "", tanggal_lahir: "", pekerjaan: "" })} data-testid="onboard-add-kel"><Plus size={13} /> Baris</Button>
+          </div>
+          {(f.anggota_keluarga || []).length === 0 ? (
+            <div className="text-[11px] text-slate-400 border border-dashed border-slate-200 rounded-md text-center py-2">Upload Kartu Keluarga agar daftar anggota terisi otomatis, atau tambah manual.</div>
+          ) : (
+            <div className="space-y-1.5">
+              {(f.anggota_keluarga || []).map((r, i) => (
+                <div key={i} className="flex items-center gap-1.5" data-testid={`onboard-kel-${i}`}>
+                  <Input className="h-8 text-xs flex-[3]" value={r.nama || ""} placeholder="Nama" onChange={(e) => setRow("anggota_keluarga", i, "nama", e.target.value)} />
+                  <Input className="h-8 text-xs flex-[2]" value={r.hubungan || ""} placeholder="Hubungan" onChange={(e) => setRow("anggota_keluarga", i, "hubungan", e.target.value)} />
+                  <Input className="h-8 text-xs flex-[3]" value={r.nik || ""} placeholder="NIK" onChange={(e) => setRow("anggota_keluarga", i, "nik", e.target.value)} />
+                  <Input className="h-8 text-xs flex-[2]" type="date" value={r.tanggal_lahir || ""} onChange={(e) => setRow("anggota_keluarga", i, "tanggal_lahir", e.target.value)} />
+                  <Input className="h-8 text-xs flex-[2]" value={r.pekerjaan || ""} placeholder="Pekerjaan" onChange={(e) => setRow("anggota_keluarga", i, "pekerjaan", e.target.value)} />
+                  <Trash size={14} className="text-rose-500 cursor-pointer shrink-0" onClick={() => rmRow("anggota_keluarga", i)} />
                 </div>
               ))}
             </div>

@@ -80,6 +80,7 @@ class PersonIn(BaseModel):
     catatan: str = ""
     riwayat_pendidikan: list = []   # [{jenjang, jurusan, institusi, tahun}]
     riwayat_pengalaman: list = []   # [{posisi, perusahaan, periode}]
+    anggota_keluarga: list = []     # [{nama, nik, hubungan, tempat_lahir, tanggal_lahir, pekerjaan}]
 
 
 @router.get("/people")
@@ -365,16 +366,8 @@ def _masa_kerja_text(rec: dict) -> str:
 def _watermark_letter(canvas, doc, rec=None):
     from reportlab.lib.pagesizes import A4
     is_sp = bool(rec and rec.get("jenis") == "sp")
-    canvas.saveState()
     w, h = A4
-    canvas.setFont("Helvetica-Bold", 40)
-    canvas.setFillColorRGB(0.55, 0.60, 0.67, alpha=0.07)
-    canvas.translate(w / 2, h / 2)
-    canvas.rotate(45)
-    canvas.drawCentredString(0, 60, "PT. MITRA KARYA SARANA")
-    canvas.drawCentredString(0, -80, "DOKUMEN RESMI HRD")
-    canvas.restoreState()
-    # Footer tetap 1 baris di bawah setiap halaman
+    # Footer 1 baris (tanpa watermark diagonal)
     canvas.saveState()
     canvas.setStrokeColorRGB(0.80, 0.84, 0.88)
     canvas.setLineWidth(0.5)

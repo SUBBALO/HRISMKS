@@ -746,6 +746,8 @@ def _parse_slip_sheet(ws, month, year):
         unit = _cell(ws, f"J{row}")
         unit_s = str(unit).strip() if unit and not isinstance(unit, (int, float)) else ""
         amt = _numify(_cell(ws, f"K{row}"))
+        if lbl_s.strip().lower() == "pinjaman":
+            lbl_s = "Lain-lain"
         slip["deductions"].append({"label": lbl_s, "qty": qty, "unit": unit_s, "amount": amt or 0})
     # Terbilang (cari di kolom A/B/C sekitar baris 26)
     terbilang = None
@@ -1216,7 +1218,7 @@ async def verify_payslip(payload: SlipVerifyIn, current: dict = Depends(require_
 # Kolom penghasilan & potongan sesuai template slip gaji MKS
 SLIP_EARNINGS = ["Gaji Pokok", "T. Tetap", "T. Kehadiran", "Lembur (1.5)", "Lembur (2)",
                  "Lembur (3)", "Lembur (4)", "Insentive+ 2nd Shift"]
-SLIP_DEDUCTIONS = ["Absent", "T. Transport", "PPh 21", "JHT+JP (2%+1%)", "BPJS KESEHATAN 1%", "Pinjaman"]
+SLIP_DEDUCTIONS = ["Absent", "T. Transport", "PPh 21", "JHT+JP (2%+1%)", "BPJS KESEHATAN 1%", "Lain-lain"]
 
 
 @router.get("/import-template")

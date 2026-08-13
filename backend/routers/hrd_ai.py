@@ -181,11 +181,17 @@ async def draft_letter(payload: DraftIn, current: dict = Depends(require_hrd_per
     sp_info = f" Tingkat: {payload.tingkat_sp}." if payload.jenis == "sp" and payload.tingkat_sp else ""
 
     from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from datetime import datetime, timezone, timedelta
+    tgl = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7)))
+    BULAN = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+    tgl_str = f"{tgl.day} {BULAN[tgl.month]} {tgl.year}"
     chat = LlmChat(api_key=LLM_KEY, session_id=f"draft-{uuid.uuid4().hex[:8]}",
                    system_message=("Kamu staf HRD senior PT. Mitra Karya Sarana (perusahaan manufaktur di Batam). "
                                    "Tulis surat resmi berbahasa Indonesia yang formal, sopan, ringkas, dan sesuai norma ketenagakerjaan Indonesia. "
-                                   "Keluarkan HANYA isi surat (tanpa kop, tanpa penjelasan tambahan). "
-                                   "Gunakan placeholder [tanggal] bila perlu tanggal.")).with_model("openai", "gpt-5.4")
+                                   "Keluarkan HANYA isi surat (tanpa kop, tanpa judul surat, tanpa nomor surat, tanpa penjelasan tambahan). "
+                                   "JANGAN menulis blok tanda tangan, 'Hormat kami', 'Batam, [tanggal]', atau nama penandatangan — "
+                                   "dokumen diterbitkan elektronik oleh sistem. Akhiri cukup dengan kalimat penutup. "
+                                   f"Bila perlu menyebut tanggal hari ini, gunakan {tgl_str}.")).with_model("openai", "gpt-5.4")
     prompt = (f"Buat draft {kind}.{sp_info}{emp_info}\n"
               f"Kronologi/poin dari HRD: {payload.kronologi.strip()}\n"
               "Struktur: pembuka, isi (uraikan kronologi secara profesional), penutup dengan konsekuensi/harapan yang wajar.")

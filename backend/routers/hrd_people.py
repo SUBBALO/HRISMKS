@@ -306,17 +306,13 @@ async def verify_letter(payload: VerifyIn, current: dict = Depends(require_hrd_p
 # ---------------- PDF Surat ----------------
 def _letter_qr(rec: dict) -> io.BytesIO:
     kind = LETTER_KINDS[rec["jenis"]]
-    masa = _masa_kerja_text(rec)
-    text = ("PT. MITRA KARYA SARANA — VERIFIKASI DOKUMEN\n"
-            f"Jenis : {kind['title'].title()}\n"
-            f"No    : {rec['nomor']}\n"
-            f"Nama  : {rec['nama']}\n"
-            f"NIK   : {rec['nik']}\n"
-            f"Jabatan : {rec['jabatan']}\n"
-            f"Masa Kerja : {masa}\n"
-            f"Kode Verifikasi : {rec['kode']}\n"
-            "Cek keaslian: hubungi HRD PT. Mitra Karya Sarana dan sebutkan kode verifikasi.")
-    img = qrcode.make(text, box_size=8, border=2)
+    lines = ["PT. MITRA KARYA SARANA",
+             f"{kind['title'].title()} No: {rec['nomor']}"]
+    if rec.get("nama"):
+        lines.append(f"Nama: {rec['nama']}" + (f" | NIK: {rec['nik']}" if rec.get("nik") else ""))
+    lines.append(f"Kode Verifikasi: {rec['kode']}")
+    lines.append("Cek keaslian: hubungi HRD MKS")
+    img = qrcode.make("\n".join(lines), box_size=8, border=2)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
@@ -341,6 +337,17 @@ def _watermark_letter(canvas, doc):
     canvas.rotate(45)
     canvas.drawCentredString(0, 60, "PT. MITRA KARYA SARANA")
     canvas.drawCentredString(0, -80, "DOKUMEN RESMI HRD")
+    canvas.restoreState()
+    # Footer tetap 1 baris di bawah setiap halaman
+    canvas.saveState()
+    canvas.setStrokeColorRGB(0.80, 0.84, 0.88)
+    canvas.setLineWidth(0.5)
+    canvas.line(20 * 2.8346, 34, w - 20 * 2.8346, 34)
+    canvas.setFont("Helvetica", 6.8)
+    canvas.setFillColorRGB(0.42, 0.45, 0.50)
+    canvas.drawString(20 * 2.8346, 24,
+                      "Dokumen diproses otomatis oleh sistem HRIS PT. Mitra Karya Sarana — sah tanpa tanda tangan basah. Keaslian dijamin kode verifikasi terenkripsi.")
+    canvas.drawRightString(w - 20 * 2.8346, 24, f"Hal. {canvas.getPageNumber()}")
     canvas.restoreState()
 
 
@@ -434,34 +441,20 @@ def _render_letter_pdf(rec: dict) -> io.BytesIO:
         elems.append(Paragraph(f"Demikian surat keterangan ini dibuat dengan sebenarnya {keperluan}.", body))
         elems.append(Spacer(1, 16))
 
-    qr_flow = Image(_letter_qr(rec), width=30 * mm, height=30 * mm)
+    qr_flow = Image(_letter_qr(rec), width=20 * mm, height=20 * mm)
     ver_note = Paragraph(
-        f"<b>Verifikasi Keaslian Dokumen</b><br/>"
-        f"Pindai QR untuk melihat data resmi dokumen ini. Bandingkan dengan isi surat — "
-        f"jika berbeda, dokumen tidak sah.<br/>"
-        f"<b>Kode Verifikasi : {rec['kode']}</b><br/>"
-        f"Konfirmasi keaslian: hubungi HRD PT. Mitra Karya Sarana dengan menyebutkan kode di atas.",
-        ParagraphStyle("vn", parent=styles["Normal"], fontSize=8, leading=11.5, textColor=GREY))
-    tgl = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7)))
-    terbit = Paragraph(
-        f"Batam, {tgl.day} {BULAN_ID.get(tgl.month)} {tgl.year}<br/><br/>"
-        "Diterbitkan secara elektronik oleh<br/><b>HRD — PT. Mitra Karya Sarana</b>",
-        ParagraphStyle("tb", parent=styles["Normal"], fontSize=9.5, leading=13, alignment=1))
-    grid = Table([[qr_flow, ver_note, terbit]], colWidths=[36 * mm, 74 * mm, 60 * mm])
+        f"<b>Verifikasi Keaslian</b> — Kode: <b>{rec['kode']}</b><br/>"
+        "Pindai QR lalu cocokkan dengan isi surat. Konfirmasi keaslian: hubungi HRD PT. Mitra Karya Sarana dengan menyebutkan kode di atas.",
+        ParagraphStyle("vn", parent=styles["Normal"], fontSize=7.5, leading=10.5, textColor=GREY))
+    grid = Table([[qr_flow, ver_note]], colWidths=[26 * mm, CW - 26 * mm])
     grid.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BOX", (0, 0), (1, 0), 0.5, LINE),
-        ("BACKGROUND", (0, 0), (1, 0), colors.HexColor("#F8FAFC")),
-        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BOX", (0, 0), (-1, -1), 0.5, LINE),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
     ]))
     elems.append(grid)
-    elems.append(Spacer(1, 10))
-
-    elems.append(Paragraph(
-        "Dokumen ini diproses otomatis oleh sistem HRIS dan sah tanpa tanda tangan basah. "
-        "Keaslian dokumen dijamin oleh kode verifikasi terenkripsi yang tercatat di sistem HRD.",
-        ParagraphStyle("f", parent=styles["Normal"], fontSize=7.5, textColor=colors.HexColor("#64748B"))))
 
     pdf.build(elems, onFirstPage=_watermark_letter, onLaterPages=_watermark_letter)
     buf.seek(0)

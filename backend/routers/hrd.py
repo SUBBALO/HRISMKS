@@ -953,6 +953,18 @@ def _watermark(canvas, doc):
     canvas.drawCentredString(0, -40, "PT. MITRA KARYA SARANA")
     canvas.drawCentredString(0, -160, "SLIP GAJI • RAHASIA")
     canvas.restoreState()
+    # Footer tetap 1 baris
+    canvas.saveState()
+    w2, h2 = A4
+    canvas.setStrokeColorRGB(0.80, 0.84, 0.88)
+    canvas.setLineWidth(0.5)
+    canvas.line(16 * 2.8346, 34, w2 - 16 * 2.8346, 34)
+    canvas.setFont("Helvetica", 6.8)
+    canvas.setFillColorRGB(0.42, 0.45, 0.50)
+    canvas.drawString(16 * 2.8346, 24,
+                      "Dokumen diproses otomatis oleh sistem HRIS PT. Mitra Karya Sarana — sah tanpa tanda tangan basah. RAHASIA: mohon tidak disebarluaskan.")
+    canvas.drawRightString(w2 - 16 * 2.8346, 24, f"Hal. {canvas.getPageNumber()}")
+    canvas.restoreState()
 
 
 def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
@@ -1112,14 +1124,9 @@ def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
         [Paragraph(f"<b>No. Dokumen</b> : {no_dok}", note_style),
          Paragraph(f"Diterbitkan secara elektronik oleh <b>HRD — PT. Mitra Karya Sarana</b><br/>Batam, {tgl_str} ({stamp})",
                    ParagraphStyle("nvr", parent=note_style, alignment=2))],
-        [Paragraph("Dokumen ini diproses otomatis oleh sistem HRIS dan <b>sah tanpa tanda tangan basah</b>. "
-                   "<b>RAHASIA</b> — slip gaji bersifat pribadi, mohon tidak disebarluaskan.",
-                   ParagraphStyle("nvb", parent=note_style, textColor=colors.HexColor("#64748B"))), ""],
     ], colWidths=[CW / 2, CW / 2])
     valid_tbl.setStyle(TableStyle([
-        ("SPAN", (0, 1), (1, 1)),
         ("BOX", (0, 0), (-1, -1), 0.5, LINE),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.4, colors.HexColor("#E2E8F0")),
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),

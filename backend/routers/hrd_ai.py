@@ -235,12 +235,102 @@ async def ocr_ktp(file: UploadFile = File(...), current: dict = Depends(require_
                                              "jenis_kelamin", "alamat", "agama", "status_kawin"]}
 
 
+# ---------------- AI baca dokumen per kategori (untuk onboarding karyawan) ----------------
+READ_PROMPTS = {
+    "ktp": ('Baca KTP terlampir, keluarkan JSON: "nik_ktp" (16 digit), "nama", "tempat_lahir", '
+            '"tanggal_lahir" (YYYY-MM-DD), "jenis_kelamin" ("Laki-laki"/"Perempuan"), "alamat" (gabungan lengkap), '
+            '"agama", "status_kawin" ("Belum Kawin"/"Kawin"/"Cerai Hidup"/"Cerai Mati"), '
+            '"keterangan" ("KTP a.n. <nama>"). Bila tidak terbaca, isi "".'),
+    "ijazah": ('Baca ijazah terlampir, keluarkan JSON: "keterangan" (ringkas: "Ijazah <jenjang> <jurusan> - <institusi>, lulus <tahun>"), '
+               '"pendidikan" ("<jenjang> <jurusan>"). Bila tidak terbaca, isi "".'),
+    "pengalaman": ('Baca surat pengalaman kerja/paklaring terlampir, keluarkan JSON: '
+                   '"keterangan" (ringkas: "Pengalaman: <posisi> di <perusahaan> (<periode>)"). Bila tidak terbaca, isi "".'),
+    "kk": ('Baca Kartu Keluarga (KK) terlampir, keluarkan JSON: "no_kk" (16 digit nomor KK), '
+           '"alamat" (alamat lengkap tertera di KK), "nama_ibu_kandung" (nama ibu bila terbaca), '
+           '"status_kawin" ("Belum Kawin"/"Kawin"/"Cerai Hidup"/"Cerai Mati" untuk kepala keluarga bila terbaca), '
+           '"keterangan" (ringkas: "KK No <no_kk> — <jumlah> anggota keluarga"). Bila tidak terbaca, isi "".'),
+    "lainnya": ('Identifikasi dokumen terlampir, keluarkan JSON: "keterangan" (deskripsi singkat 1 kalimat jenis & isi dokumen, bahasa Indonesia).'),
+}
+
+
+@router.post("/ai/read-doc")
+async def read_doc(file: UploadFile = File(...), kategori: str = Form(...),
+                   current: dict = Depends(require_hrd_perm("hrd_dokumen", "create"))):
+    prompt = READ_PROMPTS.get(kategori)
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Kategori tidak dikenal")
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in CV_EXT:
+        raise HTTPException(status_code=400, detail="File harus PDF/JPG/PNG/WEBP")
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Ukuran file maksimal 10 MB")
+    tmp = CV_DIR / f"rd-{uuid.uuid4().hex[:8]}{ext}"
+    CV_DIR.mkdir(parents=True, exist_ok=True)
+    tmp.write_bytes(data)
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+    chat = LlmChat(api_key=LLM_KEY, session_id=f"rd-{uuid.uuid4().hex[:8]}",
+                   system_message="Kamu asisten HRD yang membaca dokumen. Jawab HANYA dengan JSON valid.").with_model("gemini", "gemini-2.5-flash")
+    try:
+        resp = await chat.send_message(UserMessage(
+            text=prompt, file_contents=[FileContentWithMimeType(file_path=str(tmp), mime_type=CV_EXT[ext])]))
+        parsed = _parse_json(str(resp))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI gagal membaca dokumen: {e}")
+    finally:
+        tmp.unlink(missing_ok=True)
+    return parsed
+
+
 # ---------------- Arsipkan surat AI (nomor terpusat + QR) ----------------
 class SaveLetterIn(BaseModel):
     jenis: str  # sp / panggilan / memo / pengumuman
     employee_id: str = ""
     tingkat_sp: str = ""
     body: str
+
+
+@router.post("/ai/preview-letter")
+async def preview_ai_letter(payload: SaveLetterIn, current: dict = Depends(require_hrd_perm("hrd_dokumen", "create"))):
+    """Preview PDF draft TANPA menyimpan/menomori."""
+    from routers.hrd_people import LETTER_KINDS, _render_letter_pdf
+    from fastapi.responses import StreamingResponse as SR
+    kind = LETTER_KINDS.get(payload.jenis)
+    if not kind or payload.jenis in ("skk", "paklaring"):
+        raise HTTPException(status_code=400, detail="Jenis surat tidak valid")
+    if not payload.body.strip():
+        raise HTTPException(status_code=400, detail="Isi surat kosong")
+    emp = None
+    if payload.employee_id:
+        emp = await db.hrd_employees.find_one({"id": payload.employee_id, **NOT_DELETED_FILTER}, {"_id": 0})
+    rec = {"id": "draft", "nomor": "DRAFT — BELUM DITERBITKAN", "jenis": payload.jenis,
+           "kode": "BELUM-TERBIT", "tingkat_sp": payload.tingkat_sp, "body": payload.body.strip(),
+           "nama": emp.get("nama", "") if emp else "", "nik": emp.get("nik", "") if emp else "",
+           "dept": "", "jabatan": "", "tanggal_masuk": "", "tanggal_keluar": "", "keperluan": ""}
+    buf = _render_letter_pdf(rec)
+    return SR(buf, media_type="application/pdf",
+              headers={"Content-Disposition": 'inline; filename="preview_draft.pdf"'})
+
+
+class LetterEditIn(BaseModel):
+    body: str
+    tingkat_sp: str = ""
+
+
+@router.put("/letters/{lid}")
+async def edit_letter(lid: str, payload: LetterEditIn, current: dict = Depends(require_hrd_perm("hrd_dokumen", "edit"))):
+    rec = await db.hrd_letters.find_one({"id": lid, **NOT_DELETED_FILTER}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Surat tidak ditemukan")
+    if not rec.get("body"):
+        raise HTTPException(status_code=400, detail="Surat SKK/Paklaring tidak bisa diedit isinya (dibuat dari data karyawan)")
+    if not payload.body.strip():
+        raise HTTPException(status_code=400, detail="Isi surat kosong")
+    await db.hrd_letters.update_one({"id": lid}, {"$set": {
+        "body": payload.body.strip(), "tingkat_sp": payload.tingkat_sp or rec.get("tingkat_sp", ""),
+        "edited_by": current.get("name") or current.get("username", ""), "edited_at": _now()}})
+    await log_action(current, "hrd_letter_edit", "hrd_letters", lid, {"nomor": rec["nomor"]})
+    return await db.hrd_letters.find_one({"id": lid}, {"_id": 0})
 
 
 @router.post("/ai/save-letter")

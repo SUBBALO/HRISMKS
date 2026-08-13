@@ -9,6 +9,7 @@ import LoginPage from "./pages/LoginPage";
 import HrdPortalPage from "./pages/HrdPortalPage";
 import AdminPage from "./pages/AdminPage";
 import AccountMenu from "./components/AccountMenu";
+import VerifikasiButton from "./components/VerifikasiButton";
 
 function Header() {
   const { user, logout } = useAuth();
@@ -28,6 +29,7 @@ function Header() {
           {user.is_super_admin && loc.pathname !== "/admin" && (
             <Link to="/admin"><Button variant="outline" size="sm" className="gap-1.5" data-testid="nav-admin"><ShieldCheck size={15} /> Admin</Button></Link>
           )}
+          <VerifikasiButton />
           <div className="text-right hidden sm:block">
             <div className="text-sm font-semibold text-slate-700 leading-tight">{user.name || user.username}</div>
             <div className="text-[10px] text-slate-400 uppercase tracking-wide">{user.role}</div>

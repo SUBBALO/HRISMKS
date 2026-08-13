@@ -25,7 +25,7 @@ UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "employees"
 ALLOWED_EXT = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
 MAX_UPLOAD = 10 * 1024 * 1024  # 10MB
 
-DOC_TYPES = ["KTP", "Kartu Keluarga", "Ijazah", "NPWP", "BPJS Ketenagakerjaan", "BPJS Kesehatan",
+DOC_TYPES = ["KTP", "Kartu Keluarga", "Ijazah", "Pengalaman Kerja", "NPWP", "BPJS Ketenagakerjaan", "BPJS Kesehatan",
              "Kontrak Kerja", "CV / Lamaran", "Sertifikat", "Pas Foto", "Lainnya"]
 
 
@@ -44,13 +44,21 @@ class PersonIn(BaseModel):
     nama: str = ""
     nik: str = ""            # NIK karyawan internal (MKS xxxx)
     nik_ktp: str = ""
+    no_kk: str = ""          # No. Kartu Keluarga
     tempat_lahir: str = ""
     tanggal_lahir: str = ""
     jenis_kelamin: str = ""  # L / P
+    golongan_darah: str = ""
+    kewarganegaraan: str = "WNI"
     agama: str = ""
     status_kawin: str = ""
+    nama_pasangan: str = ""
+    jumlah_tanggungan: str = ""
+    nama_ibu_kandung: str = ""
     pendidikan: str = ""
+    jurusan: str = ""
     alamat: str = ""
+    alamat_domisili: str = ""
     telp: str = ""
     email: str = ""
     # kepegawaian
@@ -67,6 +75,7 @@ class PersonIn(BaseModel):
     no_bpjs_kes: str = ""
     # kontak darurat
     kontak_darurat_nama: str = ""
+    kontak_darurat_hubungan: str = ""
     kontak_darurat_telp: str = ""
     catatan: str = ""
 
@@ -158,6 +167,7 @@ async def get_photo(emp_id: str, current: dict = Depends(require_hrd_perm("hrd_d
 # ---------------- Dokumen karyawan (upload/list/download/hapus) ----------------
 @router.post("/people/{emp_id}/docs")
 async def upload_doc(emp_id: str, doc_type: str = Form(...), file: UploadFile = File(...),
+                     keterangan: str = Form(""),
                      current: dict = Depends(require_hrd_perm("hrd_dokumen", "create"))):
     emp = await db.hrd_employees.find_one({"id": emp_id, **NOT_DELETED_FILTER}, {"_id": 0})
     if not emp:
@@ -174,6 +184,7 @@ async def upload_doc(emp_id: str, doc_type: str = Form(...), file: UploadFile = 
     path = folder / f"{doc_id}{ext}"
     path.write_bytes(data)
     rec = {"id": doc_id, "employee_id": emp_id, "doc_type": doc_type, "filename": file.filename,
+           "keterangan": keterangan.strip(),
            "ext": ext, "size": len(data), "content_type": file.content_type or "application/octet-stream",
            "uploaded_by": current.get("name") or current.get("username", ""), "uploaded_at": _now()}
     await db.hrd_emp_docs.insert_one(dict(rec))
@@ -269,6 +280,28 @@ async def create_letter(payload: LetterIn, current: dict = Depends(require_hrd_p
     return rec
 
 
+@router.post("/letters/preview")
+async def preview_letter(payload: LetterIn, current: dict = Depends(require_hrd_perm("hrd_dokumen", "create"))):
+    """Preview PDF SKK/Paklaring TANPA menyimpan/menomori."""
+    kind = LETTER_KINDS.get(payload.jenis)
+    if not kind:
+        raise HTTPException(status_code=400, detail="Jenis surat tidak dikenal")
+    emp = await db.hrd_employees.find_one({"id": payload.employee_id, **NOT_DELETED_FILTER}, {"_id": 0})
+    if not emp:
+        raise HTTPException(status_code=404, detail="Karyawan tidak ditemukan")
+    rec = {
+        "id": "draft", "nomor": "DRAFT — BELUM DITERBITKAN", "jenis": payload.jenis, "kode": "BELUM-TERBIT",
+        "employee_id": emp["id"], "nama": emp.get("nama", ""), "nik": emp.get("nik", ""),
+        "dept": emp.get("dept", ""), "jabatan": emp.get("jabatan", ""),
+        "tanggal_masuk": emp.get("tanggal_masuk", ""),
+        "tanggal_keluar": payload.tanggal_keluar or emp.get("tanggal_keluar", ""),
+        "keperluan": payload.keperluan.strip(),
+    }
+    buf = _render_letter_pdf(rec)
+    return StreamingResponse(buf, media_type="application/pdf",
+                             headers={"Content-Disposition": 'inline; filename="preview_surat.pdf"'})
+
+
 @router.get("/letters")
 async def list_letters(current: dict = Depends(require_hrd_perm("hrd_dokumen", "view"))):
     items = await db.hrd_letters.find(NOT_DELETED_FILTER, {"_id": 0}).sort("created_at", -1).to_list(1000)
@@ -327,7 +360,7 @@ def _masa_kerja_text(rec: dict) -> str:
     return f"{masuk} s/d sekarang (karyawan aktif)"
 
 
-def _watermark_letter(canvas, doc):
+def _watermark_letter(canvas, doc, rec=None):
     from reportlab.lib.pagesizes import A4
     canvas.saveState()
     w, h = A4
@@ -348,7 +381,32 @@ def _watermark_letter(canvas, doc):
     canvas.drawString(20 * 2.8346, 24,
                       "Dokumen diproses otomatis oleh sistem HRIS PT. Mitra Karya Sarana — sah tanpa tanda tangan basah. Keaslian dijamin kode verifikasi terenkripsi.")
     canvas.drawRightString(w - 20 * 2.8346, 24, f"Hal. {canvas.getPageNumber()}")
+    if rec and canvas.getPageNumber() > 1:
+        canvas.setFont("Helvetica-Oblique", 7.5)
+        canvas.drawCentredString(w / 2, h - 30,
+                                 f"Lanjutan {LETTER_KINDS[rec['jenis']]['title'].title()} No. {rec['nomor']}")
     canvas.restoreState()
+
+
+KOP_SURAT_PATH = Path(__file__).resolve().parent.parent / "assets" / "kop_surat.pdf"
+
+
+def _merge_with_kop(content_buf: io.BytesIO) -> io.BytesIO:
+    """Overlay konten surat di atas kop surat resmi (semua dokumen kecuali Slip Gaji)."""
+    if not KOP_SURAT_PATH.exists():
+        content_buf.seek(0)
+        return content_buf
+    from pypdf import PdfReader, PdfWriter
+    content = PdfReader(content_buf)
+    writer = PdfWriter()
+    for cp in content.pages:
+        bg = PdfReader(str(KOP_SURAT_PATH)).pages[0]
+        bg.merge_page(cp)
+        writer.add_page(bg)
+    out = io.BytesIO()
+    writer.write(out)
+    out.seek(0)
+    return out
 
 
 def _render_letter_pdf(rec: dict) -> io.BytesIO:
@@ -367,25 +425,10 @@ def _render_letter_pdf(rec: dict) -> io.BytesIO:
     small = ParagraphStyle("s", parent=styles["Normal"], fontSize=9)
 
     buf = io.BytesIO()
-    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=16 * mm, bottomMargin=14 * mm,
+    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=42 * mm, bottomMargin=16 * mm,
                             leftMargin=20 * mm, rightMargin=20 * mm)
     CW = 170 * mm
     elems = []
-
-    head = Table([
-        [Paragraph("PT. MITRA KARYA SARANA",
-                   ParagraphStyle("hc", parent=styles["Normal"], fontSize=12, alignment=1,
-                                  fontName="Helvetica-Bold", textColor=DARK))],
-        [Paragraph("Taiwan International Park Blok B No. 117 - Kel. Kabil, Kec. Nongsa, Kota Batam, Kepulauan Riau",
-                   ParagraphStyle("hs", parent=styles["Normal"], fontSize=8, alignment=1,
-                                  textColor=colors.HexColor("#64748B")))],
-    ], colWidths=[CW])
-    head.setStyle(TableStyle([
-        ("LINEBELOW", (0, 1), (0, 1), 0.8, DARK),
-        ("BOTTOMPADDING", (0, 0), (0, 0), 1), ("BOTTOMPADDING", (0, 1), (0, 1), 5),
-    ]))
-    elems.append(head)
-    elems.append(Spacer(1, 16))
 
     elems.append(Paragraph(f"<u>{kind['title']}{(' ' + rec['tingkat_sp']) if rec.get('tingkat_sp') else ''}</u>",
                            ParagraphStyle("t", parent=styles["Normal"], fontSize=13, alignment=1,
@@ -456,9 +499,10 @@ def _render_letter_pdf(rec: dict) -> io.BytesIO:
     ]))
     elems.append(grid)
 
-    pdf.build(elems, onFirstPage=_watermark_letter, onLaterPages=_watermark_letter)
+    deco = lambda canvas, doc: _watermark_letter(canvas, doc, rec)  # noqa: E731
+    pdf.build(elems, onFirstPage=deco, onLaterPages=deco)
     buf.seek(0)
-    return buf
+    return _merge_with_kop(buf)
 
 
 @router.get("/letters/{lid}/pdf")

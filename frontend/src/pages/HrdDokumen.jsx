@@ -13,6 +13,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import OnboardDialog from "./HrdOnboard";
 import {
   UsersThree, Plus, Trash, PencilSimple, FilePdf, MagnifyingGlass, Files, UploadSimple,
   DownloadSimple, SealCheck, XCircle, FileText, QrCode, ArrowLeft, CaretRight, Eye, Camera,
@@ -38,8 +39,6 @@ const MODULES = [
     desc: "Data lengkap karyawan: pribadi, kepegawaian, BPJS, bank — plus arsip dokumen (KTP, ijazah, dll)." },
   { key: "surat", title: "Surat Kerja", icon: FilePdf, tint: "text-rose-600", bg: "bg-rose-50",
     desc: "Terbitkan Surat Keterangan Kerja & Surat Pengalaman Kerja (Paklaring) ber-QR dari data karyawan." },
-  { key: "verifikasi", title: "Verifikasi Surat", icon: QrCode, tint: "text-emerald-600", bg: "bg-emerald-50",
-    desc: "Cek keaslian surat yang beredar dengan kode verifikasi — ASLI atau TIDAK TERDAFTAR." },
 ];
 
 export default function DokumenHub({ can }) {
@@ -84,18 +83,19 @@ export default function DokumenHub({ can }) {
       </div>
       {view === "karyawan" && <PeopleSection can={can} />}
       {view === "surat" && <LettersSection can={can} />}
-      {view === "verifikasi" && <VerifySection />}
     </div>
   );
 }
 
 /* ============================ Database Karyawan ============================ */
 const EMPTY_PERSON = {
-  nama: "", nik: "", nik_ktp: "", tempat_lahir: "", tanggal_lahir: "", jenis_kelamin: "", agama: "",
-  status_kawin: "", pendidikan: "", alamat: "", telp: "", email: "",
+  nama: "", nik: "", nik_ktp: "", no_kk: "", tempat_lahir: "", tanggal_lahir: "", jenis_kelamin: "",
+  golongan_darah: "", kewarganegaraan: "WNI", agama: "", status_kawin: "", nama_pasangan: "",
+  jumlah_tanggungan: "", nama_ibu_kandung: "", pendidikan: "", jurusan: "",
+  alamat: "", alamat_domisili: "", telp: "", email: "",
   dept: "", jabatan: "", status_karyawan: "", tanggal_masuk: "", tanggal_keluar: "",
   bank: "", no_rekening: "", npwp: "", no_bpjs_tk: "", no_bpjs_kes: "",
-  kontak_darurat_nama: "", kontak_darurat_telp: "", catatan: "",
+  kontak_darurat_nama: "", kontak_darurat_hubungan: "", kontak_darurat_telp: "", catatan: "",
 };
 
 function PeopleSection({ can }) {
@@ -105,7 +105,7 @@ function PeopleSection({ can }) {
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState(null);       // person object or EMPTY_PERSON
   const [detail, setDetail] = useState(null);   // person for detail popup
-  const [ktpBusy, setKtpBusy] = useState(false);
+  const [onboardOpen, setOnboardOpen] = useState(false);
   const [delId, setDelId] = useState(null);
 
   const load = useCallback(async () => {
@@ -135,28 +135,9 @@ function PeopleSection({ can }) {
             className="pl-9 w-72" data-testid="people-search" />
         </div>
         {can?.create && (
-          <div className="flex items-center gap-2">
-            <label className="inline-flex">
-              <input type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" hidden data-testid="ktp-scan-input"
-                onChange={async (e) => {
-                  const f = e.target.files?.[0]; e.target.value = "";
-                  if (!f) return;
-                  setKtpBusy(true); toast.info("AI membaca KTP… (10-20 detik)");
-                  try {
-                    const fd = new FormData(); fd.append("file", f);
-                    const r = await api.post("/hrd/ai/ocr-ktp", fd, { timeout: 120000 });
-                    setEdit({ ...EMPTY_PERSON, ...r.data });
-                    toast.success("KTP terbaca — periksa & lengkapi datanya");
-                  } catch (err) { toast.error(errMsg(err)); } finally { setKtpBusy(false); }
-                }} />
-              <Button size="sm" variant="outline" className="gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50" asChild disabled={ktpBusy}>
-                <span className="cursor-pointer" data-testid="ktp-scan-btn"><Camera size={15} /> {ktpBusy ? "Membaca KTP…" : "Scan KTP (AI)"}</span>
-              </Button>
-            </label>
-            <Button size="sm" className="bg-rose-600 hover:bg-rose-700 gap-1.5" onClick={() => setEdit({ ...EMPTY_PERSON })} data-testid="people-add-btn">
-              <Plus size={15} weight="bold" /> Tambah Karyawan
-            </Button>
-          </div>
+          <Button size="sm" className="bg-rose-600 hover:bg-rose-700 gap-1.5" onClick={() => setOnboardOpen(true)} data-testid="people-add-btn">
+            <Plus size={15} weight="bold" /> Tambah Karyawan
+          </Button>
         )}
       </div>
 
@@ -209,6 +190,7 @@ function PeopleSection({ can }) {
       <div className="text-[11px] text-slate-400 mt-2">Klik baris untuk melihat detail lengkap & dokumen karyawan.</div>
 
       <PersonDialog person={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />
+      <OnboardDialog open={onboardOpen} onClose={() => setOnboardOpen(false)} onDone={() => { setOnboardOpen(false); load(); }} />
       <PersonDetailDialog person={detail} docTypes={docTypes} can={can}
         onClose={() => { setDetail(null); load(); }}
         onEdit={(p) => { setDetail(null); setEdit({ ...EMPTY_PERSON, ...p }); }} />
@@ -265,16 +247,25 @@ function PersonDialog({ person, onClose, onSaved }) {
           <Fld label="Nama Lengkap *"><Input value={f.nama} onChange={set("nama")} data-testid="person-f-nama" /></Fld>
           <Fld label="NIK Karyawan"><Input value={f.nik} onChange={set("nik")} placeholder="MKS 0001" data-testid="person-f-nik" /></Fld>
           <Fld label="No. KTP (NIK)"><Input value={f.nik_ktp} onChange={set("nik_ktp")} data-testid="person-f-nikktp" /></Fld>
+          <Fld label="No. Kartu Keluarga"><Input value={f.no_kk} onChange={set("no_kk")} data-testid="person-f-nokk" /></Fld>
           <Fld label="Tempat Lahir"><Input value={f.tempat_lahir} onChange={set("tempat_lahir")} /></Fld>
           <Fld label="Tanggal Lahir"><Input type="date" value={f.tanggal_lahir} onChange={set("tanggal_lahir")} data-testid="person-f-tgllahir" /></Fld>
           <Fld label="Jenis Kelamin">{sel("jenis_kelamin", ["Laki-laki", "Perempuan"])}</Fld>
-          <Fld label="Agama"><Input value={f.agama} onChange={set("agama")} /></Fld>
+          <Fld label="Golongan Darah">{sel("golongan_darah", ["A", "B", "AB", "O", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"])}</Fld>
+          <Fld label="Kewarganegaraan"><Input value={f.kewarganegaraan} onChange={set("kewarganegaraan")} placeholder="WNI" /></Fld>
+          <Fld label="Agama">{sel("agama", ["Islam", "Kristen", "Katolik", "Hindu", "Buddha", "Konghucu"])}</Fld>
           <Fld label="Status Kawin">{sel("status_kawin", ["Belum Kawin", "Kawin", "Cerai Hidup", "Cerai Mati"])}</Fld>
+          <Fld label="Nama Pasangan"><Input value={f.nama_pasangan} onChange={set("nama_pasangan")} /></Fld>
+          <Fld label="Jumlah Tanggungan"><Input value={f.jumlah_tanggungan} onChange={set("jumlah_tanggungan")} placeholder="0" /></Fld>
+          <Fld label="Nama Ibu Kandung"><Input value={f.nama_ibu_kandung} onChange={set("nama_ibu_kandung")} /></Fld>
           <Fld label="Pendidikan Terakhir"><Input value={f.pendidikan} onChange={set("pendidikan")} placeholder="SMA / D3 / S1…" /></Fld>
+          <Fld label="Jurusan"><Input value={f.jurusan} onChange={set("jurusan")} placeholder="mis. Teknik Mesin" /></Fld>
           <Fld label="No. Telepon / WA"><Input value={f.telp} onChange={set("telp")} data-testid="person-f-telp" /></Fld>
           <Fld label="Email"><Input type="email" value={f.email} onChange={set("email")} data-testid="person-f-email" /></Fld>
-          <div className="col-span-2 md:col-span-3"><Label className="text-xs text-slate-500">Alamat</Label>
+          <div className="col-span-2 md:col-span-3"><Label className="text-xs text-slate-500">Alamat (sesuai KTP)</Label>
             <Textarea rows={2} value={f.alamat} onChange={set("alamat")} data-testid="person-f-alamat" /></div>
+          <div className="col-span-2 md:col-span-3"><Label className="text-xs text-slate-500">Alamat Domisili (bila berbeda)</Label>
+            <Textarea rows={2} value={f.alamat_domisili} onChange={set("alamat_domisili")} /></div>
 
           <SectionTitle>Kepegawaian</SectionTitle>
           <Fld label="Departemen"><Input value={f.dept} onChange={set("dept")} placeholder="Production" data-testid="person-f-dept" /></Fld>
@@ -292,6 +283,7 @@ function PersonDialog({ person, onClose, onSaved }) {
 
           <SectionTitle>Kontak Darurat & Catatan</SectionTitle>
           <Fld label="Nama Kontak Darurat"><Input value={f.kontak_darurat_nama} onChange={set("kontak_darurat_nama")} /></Fld>
+          <Fld label="Hubungan"><Input value={f.kontak_darurat_hubungan} onChange={set("kontak_darurat_hubungan")} placeholder="mis. Istri / Orang Tua" /></Fld>
           <Fld label="Telp Kontak Darurat"><Input value={f.kontak_darurat_telp} onChange={set("kontak_darurat_telp")} /></Fld>
           <div className="col-span-2 md:col-span-3"><Label className="text-xs text-slate-500">Catatan</Label>
             <Textarea rows={2} value={f.catatan} onChange={set("catatan")} /></div>
@@ -375,14 +367,21 @@ function PersonDetailDialog({ person, docTypes, can, onClose, onEdit }) {
         <div className="space-y-4">
           <DSection title="Data Pribadi">
             <DItem label="No. KTP" value={p.nik_ktp} />
+            <DItem label="No. Kartu Keluarga" value={p.no_kk} />
             <DItem label="Tempat, Tgl Lahir" value={[p.tempat_lahir, p.tanggal_lahir ? formatDateID(p.tanggal_lahir) : ""].filter(Boolean).join(", ")} />
             <DItem label="Jenis Kelamin" value={p.jenis_kelamin} />
+            <DItem label="Golongan Darah" value={p.golongan_darah} />
+            <DItem label="Kewarganegaraan" value={p.kewarganegaraan} />
             <DItem label="Agama" value={p.agama} />
             <DItem label="Status Kawin" value={p.status_kawin} />
-            <DItem label="Pendidikan" value={p.pendidikan} />
+            <DItem label="Nama Pasangan" value={p.nama_pasangan} />
+            <DItem label="Jumlah Tanggungan" value={p.jumlah_tanggungan} />
+            <DItem label="Nama Ibu Kandung" value={p.nama_ibu_kandung} />
+            <DItem label="Pendidikan" value={[p.pendidikan, p.jurusan].filter(Boolean).join(" - ")} />
             <DItem label="Telepon / WA" value={p.telp} />
             <DItem label="Email" value={p.email} />
-            <div className="col-span-2 md:col-span-3"><DItem label="Alamat" value={p.alamat} /></div>
+            <div className="col-span-2 md:col-span-3"><DItem label="Alamat (KTP)" value={p.alamat} /></div>
+            {p.alamat_domisili && <div className="col-span-2 md:col-span-3"><DItem label="Alamat Domisili" value={p.alamat_domisili} /></div>}
           </DSection>
           <DSection title="Kepegawaian">
             <DItem label="Tanggal Masuk" value={p.tanggal_masuk ? formatDateID(p.tanggal_masuk) : ""} />
@@ -398,6 +397,7 @@ function PersonDetailDialog({ person, docTypes, can, onClose, onEdit }) {
           </DSection>
           <DSection title="Kontak Darurat">
             <DItem label="Nama" value={p.kontak_darurat_nama} />
+            <DItem label="Hubungan" value={p.kontak_darurat_hubungan} />
             <DItem label="Telepon" value={p.kontak_darurat_telp} />
           </DSection>
           {p.catatan && (
@@ -550,6 +550,7 @@ function DocsPanel({ person, docTypes, can }) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-bold text-slate-800 truncate">{d.doc_type}</div>
+                  {d.keterangan && <div className="text-[10px] text-slate-600 truncate italic">{d.keterangan}</div>}
                   <div className="text-[10px] text-slate-400 truncate">{d.filename}</div>
                   <div className="text-[10px] text-slate-400">{fmtSize(d.size)} • {formatDateID(d.uploaded_at)}</div>
                 </div>
@@ -643,6 +644,17 @@ function LettersSection({ can }) {
     } catch (e) { toast.error(errMsg(e)); }
   };
 
+  const previewPdf = async () => {
+    if (!empId) { toast.error("Pilih karyawan dulu"); return; }
+    try {
+      const r = await api.post("/hrd/letters/preview",
+        { employee_id: empId, jenis, keperluan, tanggal_keluar: jenis === "paklaring" ? tglKeluar : "" },
+        { responseType: "blob" });
+      const url = URL.createObjectURL(r.data); window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
   const create = async () => {
     if (!empId) { toast.error("Pilih karyawan dulu"); return; }
     setBusy(true);
@@ -691,9 +703,14 @@ function LettersSection({ can }) {
               <Label className="text-xs text-slate-500">Keperluan (opsional)</Label>
               <Input value={keperluan} onChange={(e) => setKeperluan(e.target.value)} placeholder="mis. untuk pengajuan kredit bank" data-testid="letter-keperluan" />
             </div>
-            <Button className="bg-rose-600 hover:bg-rose-700 gap-1.5" onClick={create} disabled={busy} data-testid="letter-create-btn">
-              <FilePdf size={16} /> {busy ? "Membuat…" : "Terbitkan Surat"}
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" className="gap-1.5 text-sky-700 border-sky-300 hover:bg-sky-50 flex-1" onClick={previewPdf} disabled={busy} data-testid="letter-preview-btn">
+                <Eye size={16} /> Preview
+              </Button>
+              <Button className="bg-rose-600 hover:bg-rose-700 gap-1.5 flex-1" onClick={create} disabled={busy} data-testid="letter-create-btn">
+                <FilePdf size={16} /> {busy ? "Membuat…" : "Terbitkan"}
+              </Button>
+            </div>
           </div>
           {selEmp && !selEmp.tanggal_masuk && (
             <div className="text-xs text-amber-600 mt-2">⚠ Karyawan ini belum punya Tanggal Masuk di database — masa kerja akan tampil "-". Lengkapi dulu di Database Karyawan.</div>
@@ -748,7 +765,7 @@ function LettersSection({ can }) {
 }
 
 /* ============================ Verifikasi ============================ */
-function VerifySection() {
+export function VerifySection() {
   const [kode, setKode] = useState("");
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);

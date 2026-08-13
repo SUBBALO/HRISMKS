@@ -9,7 +9,7 @@ import { Badge } from "../components/ui/badge";
 import { Textarea } from "../components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Trash, UploadSimple, FilePdf, Sparkle, UserPlus, Copy, Archive } from "@phosphor-icons/react";
+import { Trash, UploadSimple, FilePdf, Sparkle, UserPlus, Copy, Archive, PencilSimple } from "@phosphor-icons/react";
 
 const errMsg = (e) => formatApiErrorDetail(e?.response?.data?.detail) || e?.message || "Terjadi kesalahan";
 
@@ -154,6 +154,38 @@ export function DraftAiSection({ can }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [letters, setLetters] = useState([]);
+  const [editing, setEditing] = useState(null); // letter record
+  const [editBody, setEditBody] = useState("");
+
+  const loadLetters = useCallback(() => {
+    api.get("/hrd/letters").then((r) => setLetters(r.data.items || [])).catch(() => {});
+  }, []);
+  useEffect(() => { loadLetters(); }, [loadLetters]);
+
+  const openBlob = async (url, method = "get", data = null) => {
+    const r = method === "post"
+      ? await api.post(url, data, { responseType: "blob", timeout: 60000 })
+      : await api.get(url, { responseType: "blob" });
+    const u = URL.createObjectURL(r.data); window.open(u, "_blank");
+    setTimeout(() => URL.revokeObjectURL(u), 60000);
+  };
+  const preview = async () => {
+    if (!draft.trim()) return;
+    try { await openBlob("/hrd/ai/preview-letter", "post", { jenis, employee_id: empId, tingkat_sp: jenis === "sp" ? tingkat : "", body: draft }); }
+    catch (e) { toast.error(errMsg(e)); }
+  };
+  const saveEdit = async () => {
+    try {
+      await api.put(`/hrd/letters/${editing.id}`, { body: editBody });
+      toast.success(`${editing.nomor} diperbarui`); setEditing(null); loadLetters();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+  const delLetter = async (l) => {
+    try { await api.delete(`/hrd/letters/${l.id}`); toast.success("Surat dihapus (masuk Recycle Bin)"); loadLetters(); }
+    catch (e) { toast.error(errMsg(e)); }
+  };
+  const JLABEL = { skk: "Ket. Kerja", paklaring: "Pengalaman", sp: "SP", panggilan: "Panggilan", memo: "Memo", pengumuman: "Pengumuman" };
 
   useEffect(() => { api.get("/hrd/people").then((r) => setPeople(r.data.items || [])).catch(() => {}); }, []);
 
@@ -172,11 +204,9 @@ export function DraftAiSection({ can }) {
     setSaving(true);
     try {
       const r = await api.post("/hrd/ai/save-letter", { jenis, employee_id: empId, tingkat_sp: jenis === "sp" ? tingkat : "", body: draft });
-      toast.success(`Surat ${r.data.nomor} diarsipkan${jenis === "sp" && empId ? " + tercatat di Riwayat Karir" : ""}`);
-      const pdf = await api.get(`/hrd/letters/${r.data.id}/pdf`, { responseType: "blob" });
-      const url = URL.createObjectURL(pdf.data); window.open(url, "_blank");
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-      setDraft("");
+      toast.success(`Surat ${r.data.nomor} diterbitkan${jenis === "sp" && empId ? " + tercatat di Riwayat Karir" : ""}`);
+      await openBlob(`/hrd/letters/${r.data.id}/pdf`);
+      setDraft(""); loadLetters();
     } catch (e) { toast.error(errMsg(e)); } finally { setSaving(false); }
   };
 
@@ -218,15 +248,65 @@ export function DraftAiSection({ can }) {
             <div className="text-sm font-bold text-slate-800">Hasil Draft — silakan edit langsung</div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" className="gap-1.5" onClick={copy} data-testid="draft-copy"><Copy size={14} /> Salin</Button>
+              <Button variant="outline" size="sm" className="gap-1.5 text-sky-700 border-sky-300 hover:bg-sky-50" onClick={preview} data-testid="draft-preview">
+                <FilePdf size={14} /> Preview PDF
+              </Button>
               <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 gap-1.5" onClick={arsipkan} disabled={saving} data-testid="draft-arsipkan">
-                <Archive size={14} weight="fill" /> {saving ? "Menyimpan…" : "Terbitkan & Arsipkan (PDF + Nomor)"}
+                <Archive size={14} weight="fill" /> {saving ? "Menyimpan…" : "Terbitkan (Nomor + Arsip)"}
               </Button>
             </div>
           </div>
           <Textarea rows={16} value={draft} onChange={(e) => setDraft(e.target.value)} className="font-mono text-xs" data-testid="draft-textarea" />
-          <div className="text-[11px] text-slate-400 mt-2">Terbitkan & Arsipkan = surat dapat nomor resmi otomatis, tersimpan di Arsip Surat Kerja (dengan QR verifikasi), dan SP otomatis tercatat di Riwayat Karir karyawan.</div>
+          <div className="text-[11px] text-slate-400 mt-2">Preview PDF = lihat hasil tanpa nomor. Terbitkan = surat dapat nomor resmi, masuk Masterlist di bawah (ber-QR), dan SP otomatis tercatat di Riwayat Karir.</div>
         </Card>
       )}
+
+      {/* Masterlist semua surat */}
+      <Card className="mt-4 overflow-x-auto" data-testid="draft-masterlist">
+        <div className="px-4 pt-3 pb-1 text-sm font-bold text-slate-800">Masterlist Surat ({letters.length})</div>
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+            <tr>
+              <th className="text-left px-4 py-2 font-semibold">Nomor</th>
+              <th className="text-left px-4 py-2 font-semibold">Jenis</th>
+              <th className="text-left px-4 py-2 font-semibold">Nama</th>
+              <th className="text-left px-4 py-2 font-semibold">Kode</th>
+              <th className="text-left px-4 py-2 font-semibold">Oleh</th>
+              <th className="text-right px-4 py-2 font-semibold">Aksi</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {letters.length === 0 ? <tr><td colSpan={6} className="text-center py-6 text-slate-400">Belum ada surat diterbitkan.</td></tr>
+              : letters.map((l) => (
+                <tr key={l.id} className="hover:bg-slate-50" data-testid={`ml-row-${l.id}`}>
+                  <td className="px-4 py-2 font-medium text-slate-800 whitespace-nowrap">{l.nomor}</td>
+                  <td className="px-4 py-2 text-xs">{JLABEL[l.jenis] || l.jenis}{l.tingkat_sp ? ` ${l.tingkat_sp}` : ""}</td>
+                  <td className="px-4 py-2 text-xs">{l.nama || "-"}</td>
+                  <td className="px-4 py-2 font-mono text-[10px] text-slate-500">{l.kode}</td>
+                  <td className="px-4 py-2 text-[10px] text-slate-500">{l.created_by}{l.edited_by ? ` (edit: ${l.edited_by})` : ""}</td>
+                  <td className="px-4 py-2">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-sky-600" onClick={() => openBlob(`/hrd/letters/${l.id}/pdf`).catch((e) => toast.error(errMsg(e)))} data-testid={`ml-pdf-${l.id}`}><FilePdf size={15} /></Button>
+                      {l.body && can?.edit && <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-600" onClick={() => { setEditing(l); setEditBody(l.body); }} data-testid={`ml-edit-${l.id}`}><PencilSimple size={15} /></Button>}
+                      {can?.delete && <Button variant="ghost" size="icon" className="h-7 w-7 text-rose-500" onClick={() => delLetter(l)} data-testid={`ml-del-${l.id}`}><Trash size={15} /></Button>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </Card>
+
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent className="max-w-2xl" data-testid="ml-edit-dialog">
+          <DialogHeader><DialogTitle>Edit Isi — {editing?.nomor}</DialogTitle></DialogHeader>
+          <Textarea rows={14} value={editBody} onChange={(e) => setEditBody(e.target.value)} className="font-mono text-xs" data-testid="ml-edit-body" />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEditing(null)}>Batal</Button>
+            <Button className="bg-rose-600 hover:bg-rose-700" onClick={saveEdit} data-testid="ml-edit-save">Simpan Perubahan</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

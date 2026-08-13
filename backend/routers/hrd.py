@@ -649,7 +649,7 @@ def _parse_directory(wb):
         header_row, cols = None, {}
         for r in range(1, 13):
             labels = {}
-            for c in range(1, 25):
+            for c in range(1, 45):
                 v = ws.cell(r, c).value
                 if isinstance(v, str) and v.strip():
                     labels[v.strip().lower()] = c
@@ -660,6 +660,7 @@ def _parse_directory(wb):
                     "email": labels.get("email"),
                     "nik": labels.get("nik"),
                     "lahir": next((labels[k] for k in labels if "lahir" in k), None),
+                    "take_home": next((labels[k] for k in labels if "take home" in k), None),
                 }
                 break
         if not header_row:
@@ -671,10 +672,12 @@ def _parse_directory(wb):
             email = ws.cell(r, cols["email"]).value if cols["email"] else None
             tgl = ws.cell(r, cols["lahir"]).value if cols.get("lahir") else None
             nik = ws.cell(r, cols["nik"]).value if cols.get("nik") else None
+            th = ws.cell(r, cols["take_home"]).value if cols.get("take_home") else None
             rec = {
                 "email": str(email).strip() if email else "",
                 "tanggal_lahir": _norm_date(tgl),
                 "nik": str(nik).strip() if nik else "",
+                "take_home": _numify(th),
             }
             by_nama[str(nama).strip().lower()] = rec
             if rec["nik"]:
@@ -857,6 +860,15 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
         # Email dari sheet slip paling spesifik (override)
         if sheet_email:
             slip["email"] = sheet_email
+        # Audit: bandingkan Take Home slip vs tabel 'Daftar Gaji' (kolom Take Home Pay)
+        dg_th = drec.get("take_home") if drec else None
+        slip["dg_take_home"] = dg_th
+        if dg_th is not None and slip.get("take_home") is not None:
+            slip["audit_diff"] = round(float(slip["take_home"]) - float(dg_th), 2)
+            slip["audit_mismatch"] = abs(slip["audit_diff"]) >= 1
+        else:
+            slip["audit_diff"] = None
+            slip["audit_mismatch"] = False
         # Upsert berdasarkan (period + nama) agar re-import menimpa, bukan dobel
         existing = await db.hrd_payslips.find_one(
             {"period_month": month, "period_year": year, "nama": slip["nama"], **NOT_DELETED_FILTER})

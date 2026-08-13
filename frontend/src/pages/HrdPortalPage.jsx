@@ -618,6 +618,13 @@ function PayslipsSection({ hapi, can }) {
         Klik ikon <PencilSimple size={12} className="inline" /> untuk membuka & mengedit isi slip (termasuk email). Take Home diambil dari kolom PEMBULATAN.
       </div>
 
+      {items.some((s) => s.audit_mismatch) && (
+        <div className="flex items-start gap-2 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-md p-2.5 mb-3" data-testid="hrd-slip-audit-banner">
+          <WarningCircle size={15} weight="fill" className="shrink-0 mt-0.5" />
+          <span><b>{items.filter((s) => s.audit_mismatch).length} slip</b> memiliki Take Home berbeda dari tabel <b>Daftar Gaji</b> (ditandai <WarningCircle size={11} weight="fill" className="inline text-amber-500" /> pada kolom Take Home). Arahkan kursor ke ikon untuk melihat selisihnya.</span>
+        </div>
+      )}
+
       {items.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3" data-testid="hrd-slip-summary">
           <div className="bg-white border border-slate-200 rounded-md px-3 py-2">
@@ -661,7 +668,16 @@ function PayslipsSection({ hapi, can }) {
                     <td className="px-4 py-2.5 text-slate-600">{s.jabatan || "-"}</td>
                     <td className="px-4 py-2.5 text-right text-slate-600">{formatRupiah(s.gross)}</td>
                     <td className="px-4 py-2.5 text-right text-slate-600">{formatRupiah(s.total_deduction)}</td>
-                    <td className="px-4 py-2.5 text-right font-semibold text-emerald-700">{formatRupiah(s.take_home)}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold text-emerald-700">
+                      <div className="flex items-center justify-end gap-1">
+                        {s.audit_mismatch && (
+                          <span title={`Berbeda dari tabel Daftar Gaji: ${formatRupiah(s.dg_take_home)} (selisih ${formatRupiah(s.audit_diff)})`} data-testid={`hrd-slip-audit-${s.id}`}>
+                            <WarningCircle size={14} weight="fill" className="text-amber-500" />
+                          </span>
+                        )}
+                        {formatRupiah(s.take_home)}
+                      </div>
+                    </td>
                     <td className="px-4 py-2.5 text-center">{statusBadge(s.email_status)}</td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center justify-end gap-1">

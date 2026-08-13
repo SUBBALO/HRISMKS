@@ -55,7 +55,6 @@ export default function HrdPortalPage() {
   const [gajiPinMode, setGajiPinMode] = useState(null); // 'create' | 'verify'
   const [resetApplyOpen, setResetApplyOpen] = useState(false);
   const [approveOpen, setApproveOpen] = useState(false);
-  const [changePinOpen, setChangePinOpen] = useState(false);
 
   const loadMeta = useCallback(async () => {
     try { const r = await api.get("/hrd/my-access"); setMeta(r.data); }
@@ -142,19 +141,10 @@ export default function HrdPortalPage() {
   return (
     <div className="min-h-[calc(100vh-60px)] bg-slate-50 text-slate-900">
       <div className="max-w-[1500px] mx-auto px-4 md:px-6 py-5">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <span className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-md p-0.5 shrink-0">
-              <img src="/logo-mks.png" alt="MKS" className="w-full h-full object-contain" />
-            </span>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight" style={{ fontFamily: "Chivo, sans-serif" }}>Portal HRD</h1>
-              <p className="text-xs text-slate-500">PT Mitra Karya Sarana — Data bersifat rahasia</p>
-            </div>
-            {gajiToken && <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 ml-1 gap-1"><LockKey size={13} weight="fill" /> Gaji terbuka</Badge>}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
+        {/* Baris notifikasi & status gaji (tampil hanya bila perlu) */}
+        {(gajiToken || (meta.can_approve_reset && meta.gaji_reset_pending > 0) || (meta.can_manage_gaji_pin && meta.gaji_reset_approved)) && (
+          <div className="flex items-center justify-end gap-2 flex-wrap mb-4">
+            {gajiToken && <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 gap-1"><LockKey size={13} weight="fill" /> Gaji terbuka</Badge>}
             {/* Susanto: notifikasi permintaan reset PIN */}
             {meta.can_approve_reset && meta.gaji_reset_pending > 0 && (
               <Button size="sm" className="gap-1.5 bg-amber-500 hover:bg-amber-600 animate-pulse" onClick={() => setApproveOpen(true)} data-testid="hrd-approve-notif">
@@ -167,14 +157,9 @@ export default function HrdPortalPage() {
                 <Key size={15} weight="fill" /> Buat PIN Gaji Baru
               </Button>
             )}
-            {meta.can_manage_gaji_pin && meta.gaji_pin_set && (
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setChangePinOpen(true)} data-testid="hrd-change-gajipin">
-                <LockKey size={15} weight="bold" /> Ubah PIN Gaji
-              </Button>
-            )}
             {gajiToken && <Button variant="ghost" size="sm" className="text-slate-500" onClick={() => { setGajiToken(""); setSection("home"); }} data-testid="hrd-lock-gaji">Kunci Gaji</Button>}
           </div>
-        </div>
+        )}
 
         <div className="flex gap-5 items-start">
           {/* Sidebar (desktop) */}
@@ -224,13 +209,6 @@ export default function HrdPortalPage() {
         onRequestReset={async () => {
           await api.post("/hrd/gaji-pin/request-reset", { reason: "Lupa PIN Gaji — mohon reset" });
           await loadMeta();
-        }} />
-
-      {/* Ubah PIN Gaji (dengan PIN lama) */}
-      <ChangeGajiPinDialog open={changePinOpen} onClose={() => setChangePinOpen(false)}
-        onSave={async (oldPin, newPin) => {
-          await api.post("/hrd/set-pin", { pin: newPin, current_pin: oldPin });
-          setChangePinOpen(false); setGajiToken(""); toast.success("PIN Gaji berhasil diubah"); await loadMeta();
         }} />
 
       {/* Susanto approve reset */}
@@ -337,7 +315,7 @@ function GajiPinDialog({ mode, onClose, onCreate, onVerify, onRequestReset, canM
 }
 
 /* ============================ Ubah PIN Gaji (dgn PIN lama) ============================ */
-function ChangeGajiPinDialog({ open, onClose, onSave }) {
+export function ChangeGajiPinDialog({ open, onClose, onSave }) {
   const [oldPin, setOldPin] = useState("");
   const [np, setNp] = useState("");
   const [cp, setCp] = useState("");

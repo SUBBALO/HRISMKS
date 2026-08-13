@@ -8,6 +8,7 @@ import { UsersThree, SignOut, ShieldCheck } from "@phosphor-icons/react";
 import LoginPage from "./pages/LoginPage";
 import HrdPortalPage from "./pages/HrdPortalPage";
 import AdminPage from "./pages/AdminPage";
+import AccountMenu from "./components/AccountMenu";
 
 function Header() {
   const { user, logout } = useAuth();
@@ -31,9 +32,7 @@ function Header() {
             <div className="text-sm font-semibold text-slate-700 leading-tight">{user.name || user.username}</div>
             <div className="text-[10px] text-slate-400 uppercase tracking-wide">{user.role}</div>
           </div>
-          <span className="w-9 h-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center font-bold text-sm">
-            {(user.name || user.username || "?").charAt(0).toUpperCase()}
-          </span>
+          <AccountMenu user={user} />
           <Button variant="ghost" size="icon" className="text-slate-500 hover:text-rose-600" onClick={logout} title="Keluar" data-testid="nav-logout"><SignOut size={18} /></Button>
         </div>
       </div>

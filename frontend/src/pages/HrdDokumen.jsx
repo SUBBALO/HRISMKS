@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import OnboardDialog from "./HrdOnboard";
 import {
   UsersThree, Plus, Trash, PencilSimple, FilePdf, MagnifyingGlass, Files, UploadSimple,
-  DownloadSimple, SealCheck, XCircle, FileText, QrCode, ArrowLeft, CaretRight, Eye, Camera,
+  DownloadSimple, SealCheck, XCircle, FileText, QrCode, ArrowLeft, CaretRight, Eye, Camera, Sparkle,
 } from "@phosphor-icons/react";
 
 const errMsg = (e) => formatApiErrorDetail(e?.response?.data?.detail) || e?.message || "Terjadi kesalahan";
@@ -377,9 +377,9 @@ function DSection({ title, children }) {
 
 function PersonDetailDialog({ person, docTypes, can, onClose, onEdit }) {
   const [photo, setPhoto] = useState({ ext: null, ver: null });
-  useEffect(() => { if (person) setPhoto({ ext: person.photo_ext, ver: person.photo_ver }); }, [person]);
-  if (!person) return null;
-  const p = person;
+  const [p, setP] = useState(person);
+  useEffect(() => { setP(person); if (person) setPhoto({ ext: person.photo_ext, ver: person.photo_ver }); }, [person]);
+  if (!p) return null;
 
   const uploadPhoto = async (file) => {
     if (!file) return;
@@ -492,7 +492,7 @@ function PersonDetailDialog({ person, docTypes, can, onClose, onEdit }) {
           {p.catatan && (
             <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800"><b>Catatan:</b> {p.catatan}</div>
           )}
-          <DocsPanel person={p} docTypes={docTypes} can={can} />
+          <DocsPanel person={p} docTypes={docTypes} can={can} onEmployeeUpdate={(emp) => setP(emp)} />
           <CareerPanel person={p} can={can} />
         </div>
       </DialogContent>
@@ -575,7 +575,7 @@ const DOC_TINTS = [
 const docTint = (type, docTypes) => DOC_TINTS[Math.max(0, (docTypes || []).indexOf(type)) % DOC_TINTS.length];
 const fmtSize = (n) => n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 
-function DocsPanel({ person, docTypes, can }) {
+function DocsPanel({ person, docTypes, can, onEmployeeUpdate }) {
   const [items, setItems] = useState([]);
   const [docType, setDocType] = useState("");
   const [busy, setBusy] = useState(false);
@@ -587,19 +587,33 @@ function DocsPanel({ person, docTypes, can }) {
   }, [person.id]);
   useEffect(() => { load(); }, [load]);
 
+  const AUTO_READ = ["KTP", "Kartu Keluarga", "Ijazah", "Pengalaman Kerja"];
   const upload = async (file) => {
     if (!file) return;
     if (!docType) { toast.error("Pilih jenis dokumen dulu"); return; }
     setBusy(true);
+    if (AUTO_READ.includes(docType)) toast.info(`Mengupload & membaca ${docType} dengan AI…`);
     try {
       const fd = new FormData(); fd.append("doc_type", docType); fd.append("file", file);
-      await api.post(`/hrd/people/${person.id}/docs`, fd);
-      toast.success(`${docType} terupload`); load();
+      const r = await api.post(`/hrd/people/${person.id}/docs`, fd, { timeout: 120000 });
+      const d = r.data || {};
+      toast.success(d.ai_summary ? `${docType} terupload — ${d.ai_summary}` : `${docType} terupload`);
+      if (d.employee && onEmployeeUpdate) onEmployeeUpdate(d.employee);
+      load();
     } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
   const del = async (d) => {
     try { await api.delete(`/hrd/emp-docs/${d.id}`); toast.success("Dokumen dihapus"); load(); }
     catch (e) { toast.error(errMsg(e)); }
+  };
+  const rereadDoc = async (d) => {
+    toast.info(`Membaca ${d.doc_type} dengan AI…`);
+    try {
+      const r = await api.post(`/hrd/emp-docs/${d.id}/read`, {}, { timeout: 120000 });
+      const data = r.data || {};
+      toast.success(data.ai_summary || `${d.doc_type} dibaca`);
+      if (data.employee && onEmployeeUpdate) onEmployeeUpdate(data.employee);
+    } catch (e) { toast.error(errMsg(e)); }
   };
 
   return (
@@ -645,6 +659,10 @@ function DocsPanel({ person, docTypes, can }) {
                 </div>
                 <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                   <Eye size={14} className="text-sky-600" data-testid={`doc-open-${d.id}`} />
+                  {can?.create && AUTO_READ.includes(d.doc_type) && (
+                    <Sparkle size={14} weight="fill" className="text-amber-500" title="Baca dengan AI & isi data" data-testid={`doc-read-${d.id}`}
+                      onClick={(e) => { e.stopPropagation(); rereadDoc(d); }} />
+                  )}
                   {can?.delete && <Trash size={14} className="text-rose-500" data-testid={`doc-del-${d.id}`}
                     onClick={(e) => { e.stopPropagation(); del(d); }} />}
                 </div>

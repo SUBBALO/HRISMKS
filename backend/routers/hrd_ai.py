@@ -269,8 +269,7 @@ READ_PROMPTS = {
 @router.post("/ai/read-doc")
 async def read_doc(file: UploadFile = File(...), kategori: str = Form(...),
                    current: dict = Depends(require_hrd_perm("hrd_dokumen", "create"))):
-    prompt = READ_PROMPTS.get(kategori)
-    if not prompt:
+    if kategori not in READ_PROMPTS:
         raise HTTPException(status_code=400, detail="Kategori tidak dikenal")
     ext = Path(file.filename or "").suffix.lower()
     if ext not in CV_EXT:
@@ -278,8 +277,19 @@ async def read_doc(file: UploadFile = File(...), kategori: str = Form(...),
     data = await file.read()
     if len(data) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Ukuran file maksimal 10 MB")
-    tmp = CV_DIR / f"rd-{uuid.uuid4().hex[:8]}{ext}"
+    try:
+        return await ai_read_bytes(data, ext, kategori)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI gagal membaca dokumen: {e}")
+
+
+async def ai_read_bytes(data: bytes, ext: str, kategori: str) -> dict:
+    """Baca dokumen (bytes) dengan AI sesuai kategori, kembalikan dict JSON."""
+    prompt = READ_PROMPTS.get(kategori)
+    if not prompt or ext not in CV_EXT:
+        return {}
     CV_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = CV_DIR / f"rd-{uuid.uuid4().hex[:8]}{ext}"
     tmp.write_bytes(data)
     from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
     chat = LlmChat(api_key=LLM_KEY, session_id=f"rd-{uuid.uuid4().hex[:8]}",
@@ -287,12 +297,52 @@ async def read_doc(file: UploadFile = File(...), kategori: str = Form(...),
     try:
         resp = await chat.send_message(UserMessage(
             text=prompt, file_contents=[FileContentWithMimeType(file_path=str(tmp), mime_type=CV_EXT[ext])]))
-        parsed = _parse_json(str(resp))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"AI gagal membaca dokumen: {e}")
+        return _parse_json(str(resp))
     finally:
         tmp.unlink(missing_ok=True)
-    return parsed
+
+
+# Peta jenis dokumen (label) -> kategori pembacaan AI
+DOCTYPE_TO_KATEGORI = {"KTP": "ktp", "Kartu Keluarga": "kk", "Ijazah": "ijazah", "Pengalaman Kerja": "pengalaman"}
+_AGAMA_NORM = {"islam": "Islam", "kristen": "Kristen", "katolik": "Katolik", "hindu": "Hindu",
+               "buddha": "Buddha", "budha": "Buddha", "konghucu": "Konghucu", "kong hu cu": "Konghucu"}
+
+
+def apply_extract_to_employee(emp: dict, kategori: str, p: dict):
+    """Terapkan hasil baca AI ke data karyawan. Return (updates_dict, ringkasan_str)."""
+    upd = {}
+    if kategori == "ijazah":
+        row = {"jenjang": p.get("jenjang", "") or "", "jurusan": p.get("jurusan", "") or "",
+               "institusi": p.get("institusi", "") or "", "tahun": str(p.get("tahun", "") or "")}
+        if any(v for v in row.values()):
+            upd["riwayat_pendidikan"] = list(emp.get("riwayat_pendidikan") or []) + [row]
+            if not emp.get("pendidikan") and p.get("pendidikan"):
+                upd["pendidikan"] = p["pendidikan"]
+            if not emp.get("jurusan") and p.get("jurusan"):
+                upd["jurusan"] = p["jurusan"]
+            return upd, f"Riwayat Pendidikan +1 ({(row['jenjang'] + ' ' + row['jurusan']).strip()})"
+    elif kategori == "pengalaman":
+        row = {"posisi": p.get("posisi", "") or "", "perusahaan": p.get("perusahaan", "") or "", "periode": p.get("periode", "") or ""}
+        if any(v for v in row.values()):
+            upd["riwayat_pengalaman"] = list(emp.get("riwayat_pengalaman") or []) + [row]
+            return upd, f"Riwayat Pengalaman +1 ({row['posisi'] or row['perusahaan']})"
+    elif kategori == "kk":
+        fam = p.get("anggota_keluarga") if isinstance(p.get("anggota_keluarga"), list) else []
+        fam = [x for x in fam if isinstance(x, dict) and (x.get("nama") or x.get("nik"))]
+        if fam:
+            upd["anggota_keluarga"] = list(emp.get("anggota_keluarga") or []) + fam
+        for k in ("no_kk", "nama_ibu_kandung", "status_kawin", "alamat"):
+            if not emp.get(k) and p.get(k):
+                upd[k] = p[k]
+        return upd, (f"Data Keluarga +{len(fam)} anggota" if fam else "No. KK diperbarui")
+    elif kategori == "ktp":
+        for k in ("nik_ktp", "nama", "tempat_lahir", "tanggal_lahir", "jenis_kelamin", "alamat", "status_kawin"):
+            if not emp.get(k) and p.get(k):
+                upd[k] = p[k]
+        if not emp.get("agama") and p.get("agama"):
+            upd["agama"] = _AGAMA_NORM.get(str(p["agama"]).strip().lower(), p["agama"])
+        return upd, "Data pribadi dari KTP diperbarui"
+    return upd, ""
 
 
 # ---------------- Arsipkan surat AI (nomor terpusat + QR) ----------------

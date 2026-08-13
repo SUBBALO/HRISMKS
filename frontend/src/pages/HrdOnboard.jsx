@@ -121,7 +121,7 @@ export default function OnboardDialog({ open, onClose, onDone }) {
       const empId = r.data.id;
       for (const d of docs) {
         const fd = new FormData();
-        fd.append("doc_type", d.docType); fd.append("keterangan", d.keterangan); fd.append("file", d.file);
+        fd.append("doc_type", d.docType); fd.append("keterangan", d.keterangan); fd.append("file", d.file); fd.append("autoread", "0");
         await api.post(`/hrd/people/${empId}/docs`, fd);
       }
       toast.success(`Karyawan ${f.nama} tersimpan + ${docs.length} dokumen masuk arsip`);

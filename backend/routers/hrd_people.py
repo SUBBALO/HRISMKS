@@ -170,7 +170,7 @@ async def get_photo(emp_id: str, current: dict = Depends(require_hrd_perm("hrd_d
 # ---------------- Dokumen karyawan (upload/list/download/hapus) ----------------
 @router.post("/people/{emp_id}/docs")
 async def upload_doc(emp_id: str, doc_type: str = Form(...), file: UploadFile = File(...),
-                     keterangan: str = Form(""),
+                     keterangan: str = Form(""), autoread: str = Form("1"),
                      current: dict = Depends(require_hrd_perm("hrd_dokumen", "create"))):
     emp = await db.hrd_employees.find_one({"id": emp_id, **NOT_DELETED_FILTER}, {"_id": 0})
     if not emp:
@@ -193,7 +193,22 @@ async def upload_doc(emp_id: str, doc_type: str = Form(...), file: UploadFile = 
     await db.hrd_emp_docs.insert_one(dict(rec))
     rec.pop("_id", None)
     await log_action(current, "hrd_doc_upload", "hrd_emp_docs", doc_id, {"nama": emp.get("nama"), "jenis": doc_type})
-    return rec
+
+    # Auto-baca AI & isi data karyawan (Ijazah->Riwayat Pendidikan, dll). Dilewati bila autoread=0 (mis. dari onboarding).
+    ai_summary = ""
+    if str(autoread) not in ("0", "false", ""):
+        from routers.hrd_ai import DOCTYPE_TO_KATEGORI, ai_read_bytes, apply_extract_to_employee
+        kat = DOCTYPE_TO_KATEGORI.get(doc_type)
+        if kat:
+            try:
+                parsed = await ai_read_bytes(data, ext, kat)
+                upd, ai_summary = apply_extract_to_employee(emp, kat, parsed)
+                if upd:
+                    await db.hrd_employees.update_one({"id": emp_id}, {"$set": upd})
+            except Exception:
+                ai_summary = ""
+    employee = await db.hrd_employees.find_one({"id": emp_id, **NOT_DELETED_FILTER}, {"_id": 0})
+    return {"doc": rec, "ai_summary": ai_summary, "employee": employee}
 
 
 @router.get("/people/{emp_id}/docs")
@@ -213,6 +228,33 @@ async def download_doc(doc_id: str, current: dict = Depends(require_hrd_perm("hr
         raise HTTPException(status_code=404, detail="File tidak ditemukan di server")
     return StreamingResponse(io.BytesIO(path.read_bytes()), media_type=rec["content_type"],
                              headers={"Content-Disposition": f'inline; filename="{rec["filename"]}"'})
+
+
+@router.post("/emp-docs/{doc_id}/read")
+async def reread_doc(doc_id: str, current: dict = Depends(require_hrd_perm("hrd_dokumen", "create"))):
+    """Baca ulang dokumen yang sudah terupload dengan AI, lalu isikan ke data karyawan."""
+    rec = await db.hrd_emp_docs.find_one({"id": doc_id, **NOT_DELETED_FILTER}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan")
+    from routers.hrd_ai import DOCTYPE_TO_KATEGORI, ai_read_bytes, apply_extract_to_employee
+    kat = DOCTYPE_TO_KATEGORI.get(rec["doc_type"])
+    if not kat:
+        raise HTTPException(status_code=400, detail=f"Jenis '{rec['doc_type']}' tidak bisa dibaca AI")
+    path = UPLOAD_DIR / rec["employee_id"] / f"{doc_id}{rec['ext']}"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File tidak ditemukan di server")
+    emp = await db.hrd_employees.find_one({"id": rec["employee_id"], **NOT_DELETED_FILTER}, {"_id": 0})
+    if not emp:
+        raise HTTPException(status_code=404, detail="Karyawan tidak ditemukan")
+    try:
+        parsed = await ai_read_bytes(path.read_bytes(), rec["ext"], kat)
+        upd, ai_summary = apply_extract_to_employee(emp, kat, parsed)
+        if upd:
+            await db.hrd_employees.update_one({"id": emp["id"]}, {"$set": upd})
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI gagal membaca dokumen: {e}")
+    employee = await db.hrd_employees.find_one({"id": emp["id"], **NOT_DELETED_FILTER}, {"_id": 0})
+    return {"ai_summary": ai_summary or "Tidak ada data baru terbaca", "employee": employee}
 
 
 @router.delete("/emp-docs/{doc_id}")

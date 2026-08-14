@@ -990,7 +990,7 @@ def _watermark(canvas, doc):
     canvas.setFont("Helvetica", 6.8)
     canvas.setFillColorRGB(0.42, 0.45, 0.50)
     canvas.drawString(16 * 2.8346, 24,
-                      "Dokumen diproses otomatis oleh sistem HRIS PT. Mitra Karya Sarana — sah tanpa tanda tangan basah. RAHASIA: mohon tidak disebarluaskan.")
+                      "Dokumen otomatis dari HRIS PT Mitra Karya Sarana — Sah tanpa tanda tangan basah | RAHASIA — Tidak untuk disebarluaskan")
     canvas.drawRightString(w2 - 16 * 2.8346, 24, f"Hal. {canvas.getPageNumber()}")
     canvas.restoreState()
 

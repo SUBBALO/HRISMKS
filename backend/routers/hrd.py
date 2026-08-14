@@ -1,5 +1,6 @@
 """HRD module: Master Karyawan, Slip Gaji (fleksibel), blast email via Gmail SMTP.
 Portal dikunci PIN — bahkan admin harus masukkan PIN untuk melihat data gaji."""
+import os
 import io
 import uuid
 import hashlib
@@ -969,17 +970,9 @@ def _slip_kode(slip: dict) -> str:
 
 def _slip_qr(slip: dict, no_dok: str, kode: str):
     import qrcode
-    per = f"{BULAN_ID.get(slip.get('period_month'), slip.get('period_month'))} {slip.get('period_year')}"
-    lines = [
-        "PT. MITRA KARYA SARANA — SLIP GAJI",
-        f"No: {no_dok}",
-        f"Nama: {slip.get('nama','')}" + (f" | NIK: {slip.get('nik')}" if slip.get("nik") else ""),
-        f"Periode: {per}",
-        f"Take Home: Rp {int(round(float(slip.get('take_home') or 0))):,}".replace(",", "."),
-        f"Kode Verifikasi: {kode}",
-        "Cek keaslian: hubungi HRD MKS",
-    ]
-    img = qrcode.make("\n".join(lines), box_size=8, border=2)
+    base = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+    content = f"{base}/verify?kode={kode}" if base else f"Slip Gaji MKS | {no_dok} | Kode: {kode}"
+    img = qrcode.make(content, box_size=8, border=2)
     b = io.BytesIO()
     img.save(b, format="PNG")
     b.seek(0)
@@ -1159,26 +1152,22 @@ def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
     note_style = ParagraphStyle("nv", parent=styles["Normal"], fontSize=7.5, textColor=GREY, leading=10)
     qr_img = _Img(_slip_qr(slip, no_dok, kode), width=22 * mm, height=22 * mm)
     info_cell = Paragraph(
-        f"<b>No. Dokumen</b> : {no_dok}<br/>"
-        f"<b>Kode Verifikasi</b> : {kode}<br/>"
-        f"Diterbitkan elektronik oleh <b>HRD — PT. Mitra Karya Sarana</b><br/>"
-        f"Batam, {tgl_str} ({stamp})<br/>"
-        "<i>Pindai QR untuk verifikasi nama & nominal. Konfirmasi keaslian: hubungi HRD.</i>",
+        "<b><font size=8>VALIDASI DOKUMEN ELEKTRONIK</font></b><br/>"
+        f"Kode Verifikasi : <b>{kode}</b><br/>"
+        f"Diterbitkan oleh HRD — PT. Mitra Karya Sarana<br/>"
+        f"Batam, {tgl_str} · {stamp}<br/>"
+        "<i>Pindai QR untuk verifikasi keaslian secara online.</i>",
         note_style)
     valid_tbl = Table([[qr_img, info_cell]], colWidths=[26 * mm, CW - 26 * mm])
     valid_tbl.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.5, LINE),
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
         ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
     ]))
     elems.append(valid_tbl)
 
-    if printed_by:
-        elems.append(Spacer(1, 5))
-        elems.append(Paragraph(f"Dicetak oleh: {printed_by}",
-                               ParagraphStyle("f", parent=tiny, fontSize=7, textColor=colors.grey)))
     pdf.build(elems, onFirstPage=_watermark, onLaterPages=_watermark)
     buf.seek(0)
     return buf
@@ -1208,12 +1197,35 @@ async def verify_payslip(payload: SlipVerifyIn, current: dict = Depends(require_
         return {"valid": False, "message": "Format kode tidak valid (12 karakter)"}
     kode = f"{raw[:4]}-{raw[4:8]}-{raw[8:]}"
     slip = await db.hrd_payslips.find_one({"kode": kode, **NOT_DELETED_FILTER}, {"_id": 0})
-    if not slip or _slip_kode(slip) != kode:
+    if not slip:
         return {"valid": False, "message": "Kode slip gaji tidak terdaftar / tidak sah"}
     per = f"{BULAN_ID.get(slip.get('period_month'), slip.get('period_month'))} {slip.get('period_year')}"
     return {"valid": True, "slip": {
         "no_dok": _slip_no_dok(slip), "nama": slip.get("nama", ""), "nik": slip.get("nik", ""),
         "periode": per, "take_home": slip.get("take_home"), "kode": kode}}
+
+
+@router.get("/verify/{kode}")
+async def public_verify(kode: str):
+    """Verifikasi keaslian surat/slip secara PUBLIK (tanpa login) — untuk QR online."""
+    raw = "".join(ch for ch in str(kode).upper() if ch.isalnum())
+    if len(raw) != 12:
+        return {"valid": False, "message": "Format kode tidak valid"}
+    k = f"{raw[:4]}-{raw[4:8]}-{raw[8:]}"
+    letter = await db.hrd_letters.find_one({"kode": k, **NOT_DELETED_FILTER}, {"_id": 0})
+    if letter:
+        from routers.hrd_people import LETTER_KINDS
+        return {"valid": True, "type": "letter", "data": {
+            "nomor": letter.get("nomor"), "jenis": LETTER_KINDS.get(letter.get("jenis"), {}).get("title", letter.get("jenis")),
+            "nama": letter.get("nama", ""), "nik": letter.get("nik", ""), "jabatan": letter.get("jabatan", ""),
+            "created_at": letter.get("created_at"), "created_by": letter.get("created_by", "")}}
+    slip = await db.hrd_payslips.find_one({"kode": k, **NOT_DELETED_FILTER}, {"_id": 0})
+    if slip:
+        per = f"{BULAN_ID.get(slip.get('period_month'), slip.get('period_month'))} {slip.get('period_year')}"
+        return {"valid": True, "type": "slip", "data": {
+            "no_dok": _slip_no_dok(slip), "nama": slip.get("nama", ""), "nik": slip.get("nik", ""),
+            "periode": per, "take_home": slip.get("take_home")}}
+    return {"valid": False, "message": "Kode tidak terdaftar. Dokumen tidak dikenali sistem HRD."}
 
 
 # Kolom penghasilan & potongan sesuai template slip gaji MKS

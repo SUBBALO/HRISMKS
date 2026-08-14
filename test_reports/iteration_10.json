@@ -1,0 +1,29 @@
+{
+  "summary": "Verified the primary bug fix: public verification endpoint /api/hrd/verify/{kode} works WITHOUT authentication and correctly resolves the previously-failing slip code 247C-6B9E-5C76 (Harjono / Agustus 2026 / Rp 6.206.000 / SG/2026/08/MKS0013). Letter code A116-5FD8-4389 also resolves correctly. Public frontend page /verify loads without redirecting to /login, auto-runs the verification via ?kode= query param, and displays the correct SLIP GAJI ASLI card. Invalid codes show TIDAK TERDAFTAR. In-app Verifikasi Surat dialog (logged in as heri/123456) shows verify-result-slip, verify-result-valid, and verify-result-invalid correctly. Endpoint is read-only (POST returns 405).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Verifikasi Surat dialog", "issues": ["Radix DialogContent missing aria-describedby / Description (a11y warning only, not blocking)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_public_verify.py",
+    "/app/test_reports/pytest/public_verify.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "hrd.py is 1345 lines — consider splitting (payslip PDF rendering, SMTP blast, PIN mgmt) into separate modules for maintainability.",
+    "Public /api/hrd/verify/{kode} correctly excludes _id via projection and does not require auth — good. Consider adding a lightweight rate limit to prevent enumeration of 12-char codes (currently no throttling).",
+    "Add aria-describedby to VerifySection DialogContent to silence Radix a11y warning."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "heri / 123456 (HRD user for in-app verify).",
+  "seed_data_creation": "None — read-only verification only, no data mutated.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Public verify endpoint is fully working. Bug fix confirmed: verify_payslip/public_verify now trust stored slip['kode'] (no recompute). Payslip PDF generation NOT tested (requires Gaji PIN — off-limits per constraints). Backend pytest lives at /app/backend/tests/test_public_verify.py — reusable for regression.",
+  "rca of the issue": "Original bug: verify endpoint recomputed kode from slip fields (id|period|take_home) via HMAC and compared to input, but stored kode on the actual PDF was generated at a moment where the slip document could subsequently be edited (take_home rounding / re-import), which broke the HMAC match. Fix: both verify_payslip and public_verify now query hrd_payslips/hrd_letters by the STORED 'kode' field directly (source of truth = what was printed on the physical document). Confirmed working for real code 247C-6B9E-5C76."
+}

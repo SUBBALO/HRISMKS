@@ -1,5 +1,6 @@
 """Database Karyawan lengkap + arsip dokumen (KTP/Ijazah/dll) + Surat Kerja (SKK/Paklaring)
 dengan QR verifikasi. Semua di bawah permission menu 'hrd_dokumen' (non-payroll, tanpa PIN Gaji)."""
+import os
 import hashlib
 import hmac
 import io
@@ -375,22 +376,18 @@ async def verify_letter(payload: VerifyIn, current: dict = Depends(require_hrd_p
     rec = await db.hrd_letters.find_one({"kode": kode, **NOT_DELETED_FILTER}, {"_id": 0})
     if not rec:
         return {"valid": False, "message": "Kode tidak terdaftar di sistem — dokumen TIDAK SAH / palsu"}
-    # verifikasi ulang HMAC (jaga-jaga bila DB diubah manual)
-    if _letter_kode(rec["id"], rec["nomor"]) != kode:
-        return {"valid": False, "message": "Kode tidak cocok dengan data surat — dokumen TIDAK SAH"}
     return {"valid": True, "letter": rec}
 
 
 # ---------------- PDF Surat ----------------
 def _letter_qr(rec: dict) -> io.BytesIO:
-    kind = LETTER_KINDS[rec["jenis"]]
-    lines = ["PT. MITRA KARYA SARANA",
-             f"{kind['title'].title()} No: {rec['nomor']}"]
-    if rec.get("nama"):
-        lines.append(f"Nama: {rec['nama']}" + (f" | NIK: {rec['nik']}" if rec.get("nik") else ""))
-    lines.append(f"Kode Verifikasi: {rec['kode']}")
-    lines.append("Cek keaslian: hubungi HRD MKS")
-    img = qrcode.make("\n".join(lines), box_size=8, border=2)
+    base = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+    if base:
+        content = f"{base}/verify?kode={rec['kode']}"
+    else:
+        kind = LETTER_KINDS[rec["jenis"]]
+        content = f"{kind['title'].title()} No: {rec['nomor']} | Kode: {rec['kode']}"
+    img = qrcode.make(content, box_size=8, border=2)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)

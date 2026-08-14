@@ -10,6 +10,7 @@ import HrdPortalPage from "./pages/HrdPortalPage";
 import AdminPage from "./pages/AdminPage";
 import AccountMenu from "./components/AccountMenu";
 import VerifikasiButton from "./components/VerifikasiButton";
+import VerifyPublicPage from "./pages/VerifyPublicPage";
 
 function Header() {
   const { user, logout } = useAuth();
@@ -67,6 +68,7 @@ function App() {
         <BrowserRouter>
           <Toaster position="top-right" richColors />
           <Routes>
+            <Route path="/verify" element={<VerifyPublicPage />} />
             <Route path="/login" element={<LoginGate />} />
             <Route path="/" element={<Protected><Shell><HrdPortalPage /></Shell></Protected>} />
             <Route path="/admin" element={<Protected><Shell><AdminPage /></Shell></Protected>} />

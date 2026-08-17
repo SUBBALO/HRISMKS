@@ -106,8 +106,8 @@ export default function HrdPortalPage() {
   const dokCan = meta.is_super ? ALL : (access.hrd_dokumen || {});
 
   const openGaji = () => {
-    // Bos: tanpa PIN — langsung ke pemilih grup / area gaji.
-    if (isBoss) { setSection("gaji"); return; }
+    // Bos: tanpa PIN — klik "Data Gaji" selalu kembali ke pemilih 2 grup.
+    if (isBoss) { setPayrollGroup(null); setSection("gaji"); return; }
     if (gajiToken) { setSection("gaji"); return; }
     // Selalu ke input PIN biasa. Reset PIN hanya lewat tombol khusus di header (bila lupa).
     setGajiPinMode(meta.gaji_pin_set ? "verify" : "create");

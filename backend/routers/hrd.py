@@ -119,19 +119,35 @@ def _has_any_hrd(current: dict) -> bool:
 GAJI_GROUP = {m["key"] for m in HRD_MENUS if m["group"] == "gaji"}
 
 
+def _pgroup(current: dict) -> str:
+    """Grup payroll user: 'karyawan' (Herliana, default) atau 'staff' (Nofia)."""
+    return current.get("payroll_group") or "karyawan"
+
+
+def _pin_id(group: str) -> str:
+    return "hrd" if group == "karyawan" else f"hrd_{group}"
+
+
+def _pfilter(group: str) -> dict:
+    """Filter isolasi slip per grup. 'karyawan' juga mencakup slip lama tanpa penanda."""
+    if group == "karyawan":
+        return {"$or": [{"payroll_group": "karyawan"}, {"payroll_group": {"$exists": False}}, {"payroll_group": None}]}
+    return {"payroll_group": group}
+
+
 def _can_manage_pin(current: dict) -> bool:
-    """Hanya user yang punya akses gaji (Herliana) yang boleh set/buat PIN Gaji.
+    """Hanya user yang punya akses gaji (Herliana/Nofia) yang boleh set/buat PIN Gaji.
     Super Admin TIDAK bisa membuat PIN Gaji — ia hanya menyetujui reset."""
     acc = current.get("access") or {}
     return any((acc.get(k) or {}).get("view") for k in GAJI_GROUP)
 
 
-async def _gaji_pin_is_set() -> bool:
-    s = await db.hrd_settings.find_one({"_id": "hrd"})
+async def _gaji_pin_is_set(group: str = "karyawan") -> bool:
+    s = await db.hrd_settings.find_one({"_id": _pin_id(group)})
     return bool(s and s.get("pin_hash"))
 
 
-def _valid_token(token: str, scope: str, uid: str | None = None) -> bool:
+def _valid_token(token: str, scope: str, uid: str | None = None, group: str | None = None) -> bool:
     if not token:
         return False
     try:
@@ -139,6 +155,8 @@ def _valid_token(token: str, scope: str, uid: str | None = None) -> bool:
         if payload.get("scope") != scope:
             return False
         if uid is not None and payload.get("uid") != uid:
+            return False
+        if group is not None and (payload.get("group") or "karyawan") != group:
             return False
         return True
     except Exception:
@@ -154,12 +172,13 @@ async def require_hrd(current: dict = Depends(get_current_user)) -> dict:
 
 def require_hrd_perm(menu: str, action: str):
     """Permission menu/action. Untuk menu grup 'gaji', bila PIN Gaji aktif maka
-    wajib token PIN Gaji (header x-hrd-gaji) — berlaku untuk semua termasuk super admin."""
+    wajib token PIN Gaji (header x-hrd-gaji) sesuai GRUP payroll user."""
     async def _dep(x_hrd_gaji: str = Header(None), current: dict = Depends(require_hrd)) -> dict:
         if not has_perm(current, menu, action):
             raise HTTPException(status_code=403, detail="Anda tidak memiliki hak akses untuk aksi ini")
         if menu in GAJI_GROUP:
-            if await _gaji_pin_is_set() and not _valid_token(x_hrd_gaji, "hrd_gaji"):
+            grp = _pgroup(current)
+            if await _gaji_pin_is_set(grp) and not _valid_token(x_hrd_gaji, "hrd_gaji", group=grp):
                 raise HTTPException(status_code=401, detail="PIN Gaji diperlukan")
         return current
     return _dep
@@ -205,28 +224,31 @@ async def set_pin(payload: PinIn, current: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Hanya user Gaji (mis. Herliana) atau Super Admin yang bisa mengatur PIN Gaji")
     if not payload.pin or len(payload.pin) < 4:
         raise HTTPException(status_code=400, detail="PIN minimal 4 digit")
-    s = await db.hrd_settings.find_one({"_id": "hrd"})
-    # Bila ada persetujuan reset dari Super Admin, boleh set PIN baru TANPA PIN lama.
-    approved = await db.hrd_pin_resets.count_documents({"status": "approved"})
+    grp = _pgroup(current)
+    pid = _pin_id(grp)
+    s = await db.hrd_settings.find_one({"_id": pid})
+    # Bila ada persetujuan reset dari Super Admin (untuk grup ini), boleh set PIN baru TANPA PIN lama.
+    approved = await db.hrd_pin_resets.count_documents({"status": "approved", "group": grp})
     if s and s.get("pin_hash") and not approved:
         if not (payload.current_pin and verify_password(payload.current_pin, s["pin_hash"])):
             raise HTTPException(status_code=400, detail="PIN Gaji lama salah")
-    await db.hrd_settings.update_one({"_id": "hrd"}, {"$set": {"pin_hash": hash_password(payload.pin), "pin_updated_at": _now()}}, upsert=True)
-    # Bersihkan semua permintaan reset yang belum selesai agar tidak muncul terus
-    await db.hrd_pin_resets.update_many({"status": {"$in": ["pending", "approved"]}}, {"$set": {"status": "resolved", "resolved_at": _now()}})
-    await log_action(current, "hrd_set_pin", "hrd_settings", "hrd", {"via": "reset" if approved else "normal"})
+    await db.hrd_settings.update_one({"_id": pid}, {"$set": {"pin_hash": hash_password(payload.pin), "pin_updated_at": _now()}}, upsert=True)
+    # Bersihkan permintaan reset grup ini yang belum selesai
+    await db.hrd_pin_resets.update_many({"group": grp, "status": {"$in": ["pending", "approved"]}}, {"$set": {"status": "resolved", "resolved_at": _now()}})
+    await log_action(current, "hrd_set_pin", "hrd_settings", pid, {"via": "reset" if approved else "normal", "group": grp})
     return {"success": True}
 
 
 @router.post("/verify-pin")
 async def verify_pin(payload: PinIn, current: dict = Depends(require_hrd)):
-    s = await db.hrd_settings.find_one({"_id": "hrd"})
+    grp = _pgroup(current)
+    s = await db.hrd_settings.find_one({"_id": _pin_id(grp)})
     if not s or not s.get("pin_hash"):
         raise HTTPException(status_code=400, detail="PIN Gaji belum diatur.")
     if not verify_password(payload.pin, s["pin_hash"]):
         await log_action(current, "hrd_access_denied", "hrd", "", {"reason": "PIN gaji salah"})
         raise HTTPException(status_code=401, detail="PIN Gaji salah")
-    token = jwt.encode({"scope": "hrd_gaji", "uid": current.get("id"),
+    token = jwt.encode({"scope": "hrd_gaji", "group": grp, "uid": current.get("id"),
                         "exp": datetime.now(timezone.utc) + timedelta(hours=8)}, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return {"gaji_token": token}
 
@@ -235,7 +257,7 @@ async def verify_pin(payload: PinIn, current: dict = Depends(require_hrd)):
 async def pin_status(current: dict = Depends(get_current_user)):
     return {
         "portal_pin_set": bool(current.get("hrd_pin_hash")),
-        "gaji_pin_set": await _gaji_pin_is_set(),
+        "gaji_pin_set": await _gaji_pin_is_set(_pgroup(current)),
         "can_manage_gaji_pin": _can_manage_pin(current),
         "is_super": _is_super(current),
     }
@@ -264,11 +286,11 @@ async def my_access(current: dict = Depends(get_current_user)):
     return {
         "is_super": is_super,
         "can_enter": is_super or _has_any_hrd(current),
-        "gaji_pin_set": await _gaji_pin_is_set(),
+        "gaji_pin_set": await _gaji_pin_is_set(_pgroup(current)),
         "can_manage_gaji_pin": _can_manage_pin(current),
         "can_approve_reset": is_super,
         "gaji_reset_pending": await db.hrd_pin_resets.count_documents({"status": "pending"}),
-        "gaji_reset_approved": (await db.hrd_pin_resets.count_documents({"status": "approved"})) > 0,
+        "gaji_reset_approved": (await db.hrd_pin_resets.count_documents({"status": "approved", "group": _pgroup(current)})) > 0,
         "menus": HRD_MENUS,
         "gaji_group": sorted(GAJI_GROUP),
         "access": effective,
@@ -284,11 +306,13 @@ class ResetReqIn(BaseModel):
 async def request_gaji_pin_reset(payload: ResetReqIn, current: dict = Depends(require_hrd)):
     if not _can_manage_pin(current):
         raise HTTPException(status_code=403, detail="Hanya user Gaji (Herliana) yang bisa mengajukan reset PIN")
-    existing = await db.hrd_pin_resets.find_one({"status": {"$in": ["pending", "approved"]}})
+    grp = _pgroup(current)
+    existing = await db.hrd_pin_resets.find_one({"group": grp, "status": {"$in": ["pending", "approved"]}})
     if existing:
         raise HTTPException(status_code=400, detail="Sudah ada permintaan reset yang sedang diproses")
     doc = {
         "id": str(uuid.uuid4()),
+        "group": grp,
         "requested_by": current.get("id"),
         "requested_by_name": current.get("name") or current.get("username"),
         "reason": (payload.reason or "").strip(),
@@ -340,14 +364,15 @@ class ResetApplyIn(BaseModel):
 async def apply_gaji_pin_reset(payload: ResetApplyIn, current: dict = Depends(require_hrd)):
     if not _can_manage_pin(current):
         raise HTTPException(status_code=403, detail="Hanya user Gaji (Herliana) yang bisa membuat PIN baru")
-    approved = await db.hrd_pin_resets.count_documents({"status": "approved"})
+    grp = _pgroup(current)
+    approved = await db.hrd_pin_resets.count_documents({"status": "approved", "group": grp})
     if not approved:
         raise HTTPException(status_code=400, detail="Belum ada persetujuan reset dari Super Admin (Susanto)")
     if not payload.pin or len(payload.pin) < 4:
         raise HTTPException(status_code=400, detail="PIN minimal 4 digit")
-    await db.hrd_settings.update_one({"_id": "hrd"}, {"$set": {"pin_hash": hash_password(payload.pin), "pin_updated_at": _now()}}, upsert=True)
-    await db.hrd_pin_resets.update_many({"status": "approved"}, {"$set": {"status": "resolved", "resolved_at": _now()}})
-    await log_action(current, "hrd_set_pin", "hrd_settings", "hrd", {"via": "reset"})
+    await db.hrd_settings.update_one({"_id": _pin_id(grp)}, {"$set": {"pin_hash": hash_password(payload.pin), "pin_updated_at": _now()}}, upsert=True)
+    await db.hrd_pin_resets.update_many({"status": "approved", "group": grp}, {"$set": {"status": "resolved", "resolved_at": _now()}})
+    await log_action(current, "hrd_set_pin", "hrd_settings", _pin_id(grp), {"via": "reset", "group": grp})
     return {"success": True}
 
 
@@ -392,7 +417,7 @@ class SettingsIn(BaseModel):
 
 @router.get("/settings")
 async def get_settings(current: dict = Depends(require_hrd_perm("hrd_settings", "view"))):
-    s = await db.hrd_settings.find_one({"_id": "hrd"}) or {}
+    s = await db.hrd_settings.find_one({"_id": _pin_id(_pgroup(current))}) or {}
     return {
         "smtp_host": s.get("smtp_host", ""),
         "smtp_port": s.get("smtp_port", 465),
@@ -425,14 +450,14 @@ async def save_settings(payload: SettingsIn, current: dict = Depends(require_hrd
     if payload.smtp_password:  # only overwrite when provided
         upd["smtp_password"] = payload.smtp_password.strip()
     upd["settings_updated_at"] = _now()
-    await db.hrd_settings.update_one({"_id": "hrd"}, {"$set": upd}, upsert=True)
+    await db.hrd_settings.update_one({"_id": _pin_id(_pgroup(current))}, {"$set": upd}, upsert=True)
     return {"success": True}
 
 
 @router.post("/settings/test")
 async def test_settings(current: dict = Depends(require_hrd_perm("hrd_settings", "edit"))):
     """Uji koneksi & login SMTP tanpa mengirim email."""
-    s = await db.hrd_settings.find_one({"_id": "hrd"}) or {}
+    s = await db.hrd_settings.find_one({"_id": _pin_id(_pgroup(current))}) or {}
     host, port = s.get("smtp_host"), int(s.get("smtp_port") or 465)
     security = s.get("smtp_security") or "ssl"
     user, pw = s.get("smtp_username"), s.get("smtp_password")
@@ -542,7 +567,7 @@ def _compute_slip(d: dict) -> dict:
 
 @router.get("/payslips")
 async def list_payslips(month: int = 0, year: int = 0, current: dict = Depends(require_hrd_perm("hrd_slip_gaji", "view"))):
-    flt = dict(NOT_DELETED_FILTER)
+    flt = {**NOT_DELETED_FILTER, **_pfilter(_pgroup(current))}
     if month:
         flt["period_month"] = month
     if year:
@@ -870,9 +895,12 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
         else:
             slip["audit_diff"] = None
             slip["audit_mismatch"] = False
-        # Upsert berdasarkan (period + nama) agar re-import menimpa, bukan dobel
+        # Isolasi grup payroll (karyawan=Herliana, staff=Nofia)
+        grp = _pgroup(current)
+        slip["payroll_group"] = grp
+        # Upsert berdasarkan (period + nama + grup) agar re-import menimpa, bukan dobel
         existing = await db.hrd_payslips.find_one(
-            {"period_month": month, "period_year": year, "nama": slip["nama"], **NOT_DELETED_FILTER})
+            {"period_month": month, "period_year": year, "nama": slip["nama"], **NOT_DELETED_FILTER, **_pfilter(grp)})
         slip["updated_at"] = _now()
         if existing:
             slip["email_status"] = existing.get("email_status", "belum")
@@ -1266,7 +1294,8 @@ class BlastIn(BaseModel):
 
 @router.post("/blast")
 async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_email", "create"))):
-    s = await db.hrd_settings.find_one({"_id": "hrd"}) or {}
+    grp = _pgroup(current)
+    s = await db.hrd_settings.find_one({"_id": _pin_id(grp)}) or {}
     smtp_host = s.get("smtp_host")
     smtp_port = int(s.get("smtp_port") or 465)
     smtp_security = s.get("smtp_security") or "ssl"
@@ -1278,7 +1307,7 @@ async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_
     if not smtp_host or not smtp_user or not smtp_pw:
         raise HTTPException(status_code=400, detail="SMTP belum dikonfigurasi. Isi Host, Username & Password di tab Pengaturan Email.")
 
-    flt = {"period_month": payload.month, "period_year": payload.year, **NOT_DELETED_FILTER}
+    flt = {"period_month": payload.month, "period_year": payload.year, **NOT_DELETED_FILTER, **_pfilter(grp)}
     if payload.ids:
         flt["id"] = {"$in": payload.ids}
     slips = await db.hrd_payslips.find(flt, {"_id": 0}).to_list(2000)

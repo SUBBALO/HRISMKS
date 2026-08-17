@@ -119,9 +119,27 @@ def _has_any_hrd(current: dict) -> bool:
 GAJI_GROUP = {m["key"] for m in HRD_MENUS if m["group"] == "gaji"}
 
 
+def _allowed_groups(current: dict) -> list:
+    """Grup payroll yang boleh diakses user. Bos punya banyak grup."""
+    g = current.get("payroll_groups")
+    if isinstance(g, list) and g:
+        return list(g)
+    return [current.get("payroll_group") or "karyawan"]
+
+
+def _is_boss(current: dict) -> bool:
+    """Bos = user dengan akses lebih dari satu grup payroll (tanpa PIN Gaji)."""
+    return len(_allowed_groups(current)) > 1
+
+
 def _pgroup(current: dict) -> str:
-    """Grup payroll user: 'karyawan' (Herliana, default) atau 'staff' (Nofia)."""
-    return current.get("payroll_group") or "karyawan"
+    """Grup payroll aktif. Bos multi-grup memilih via header x-payroll-group.
+    User biasa: 'karyawan' (Herliana, default) atau 'staff' (Nofia)."""
+    allowed = _allowed_groups(current)
+    ag = current.get("_active_group")
+    if ag and ag in allowed:
+        return ag
+    return allowed[0]
 
 
 def _pin_id(group: str) -> str:
@@ -164,9 +182,11 @@ def _valid_token(token: str, scope: str, uid: str | None = None, group: str | No
 
 
 # ---------------- Portal gate (akses HRD saja — TANPA PIN Portal) ----------------
-async def require_hrd(current: dict = Depends(get_current_user)) -> dict:
+async def require_hrd(x_payroll_group: str = Header(None), current: dict = Depends(get_current_user)) -> dict:
     if not _has_any_hrd(current):
         raise HTTPException(status_code=403, detail="Anda tidak punya akses ke Portal HRD")
+    allowed = _allowed_groups(current)
+    current["_active_group"] = x_payroll_group if (x_payroll_group and x_payroll_group in allowed) else allowed[0]
     return current
 
 

@@ -285,6 +285,16 @@ function GajiArea({ hapi, can }) {
 
 /* Bos: pilih grup payroll (2 kartu) lalu kelola gaji grup itu — tanpa PIN. */
 function GajiAreaBoss({ hapi, can, groups, group, onPick, onBack }) {
+  const [summary, setSummary] = useState({});
+  useEffect(() => {
+    if (group) return;
+    let alive = true;
+    hapi.get("/hrd/payroll-summary")
+      .then((r) => { if (alive) { const map = {}; (r.data.items || []).forEach((it) => { map[it.group] = it; }); setSummary(map); } })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [group, hapi]);
+
   if (!group) {
     const list = (groups && groups.length ? groups : ["karyawan", "staff"]);
     return (
@@ -297,12 +307,28 @@ function GajiAreaBoss({ hapi, can, groups, group, onPick, onBack }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
           {list.map((g) => {
             const m = GAJI_GROUP_META[g] || { title: g, subtitle: `Payroll grup ${g}`, icon: Money, accent: "text-slate-600", ring: "hover:border-slate-400" };
+            const s = summary[g];
             return (
               <button key={g} data-testid={`boss-gaji-card-${g}`} onClick={() => onPick(g)}
                 className={`text-left bg-white border border-slate-200 rounded-xl p-5 transition-all duration-150 hover:shadow-md ${m.ring}`}>
                 <m.icon size={30} weight="duotone" className={m.accent} />
                 <div className="mt-3 text-base font-bold text-slate-800" style={{ fontFamily: "Chivo, sans-serif" }}>{m.title}</div>
                 <div className="text-sm text-slate-500">{m.subtitle}</div>
+                <div className="mt-4 pt-3 border-t border-slate-100" data-testid={`boss-gaji-summary-${g}`}>
+                  {s ? (
+                    s.count > 0 ? (
+                      <>
+                        <div className="text-[11px] uppercase tracking-wide text-slate-400">Total Take Home · {BULAN[s.period_month]} {s.period_year}</div>
+                        <div className={`text-xl font-bold ${m.accent}`} style={{ fontFamily: "Chivo, sans-serif" }}>{formatRupiah(s.total_take_home)}</div>
+                        <div className="text-xs text-slate-500 mt-0.5">{s.count} karyawan</div>
+                      </>
+                    ) : (
+                      <div className="text-xs text-slate-400">Belum ada data slip gaji</div>
+                    )
+                  ) : (
+                    <div className="text-xs text-slate-300">Memuat ringkasan…</div>
+                  )}
+                </div>
               </button>
             );
           })}

@@ -601,6 +601,25 @@ async def list_payslips(month: int = 0, year: int = 0, current: dict = Depends(r
     return {"items": items}
 
 
+@router.get("/payroll-summary")
+async def payroll_summary(current: dict = Depends(require_hrd)):
+    """Ringkasan take-home per grup untuk kartu Data Gaji bos (khusus bos multi-grup)."""
+    if not _is_boss(current):
+        raise HTTPException(status_code=403, detail="Hanya untuk akun bos multi-grup")
+    out = []
+    for g in _allowed_groups(current):
+        flt = merged(NOT_DELETED_FILTER, _pfilter(g))
+        docs = await db.hrd_payslips.find(flt, {"_id": 0, "take_home": 1, "period_month": 1, "period_year": 1}).to_list(5000)
+        if not docs:
+            out.append({"group": g, "count": 0, "total_take_home": 0, "period_month": 0, "period_year": 0})
+            continue
+        latest = max((d.get("period_year") or 0, d.get("period_month") or 0) for d in docs)
+        sel = [d for d in docs if (d.get("period_year") or 0, d.get("period_month") or 0) == latest]
+        total = sum(float(d.get("take_home") or 0) for d in sel)
+        out.append({"group": g, "count": len(sel), "total_take_home": total, "period_month": latest[1], "period_year": latest[0]})
+    return {"items": out}
+
+
 @router.post("/payslips")
 async def create_payslip(payload: PayslipIn, current: dict = Depends(require_hrd_perm("hrd_slip_gaji", "create"))):
     d = payload.dict()

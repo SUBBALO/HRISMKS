@@ -56,6 +56,7 @@ export default function HrdPortalPage() {
   const [gajiPinMode, setGajiPinMode] = useState(null); // 'create' | 'verify'
   const [resetApplyOpen, setResetApplyOpen] = useState(false);
   const [approveOpen, setApproveOpen] = useState(false);
+  const [payrollGroup, setPayrollGroup] = useState(null); // bos: grup gaji terpilih
 
   const loadMeta = useCallback(async () => {
     try { const r = await api.get("/hrd/my-access"); setMeta(r.data); }
@@ -64,7 +65,11 @@ export default function HrdPortalPage() {
   useEffect(() => { loadMeta(); }, [loadMeta]);
 
   const hapi = useMemo(() => {
-    const headers = () => ({ "x-hrd-gaji": gajiToken });
+    const headers = () => {
+      const h = { "x-hrd-gaji": gajiToken };
+      if (payrollGroup) h["x-payroll-group"] = payrollGroup;
+      return h;
+    };
     const wrap = (p) => p.catch((e) => {
       if (e?.response?.status === 401 && /PIN Gaji/i.test(errMsg(e))) setGajiToken("");
       throw e;
@@ -75,7 +80,7 @@ export default function HrdPortalPage() {
       put: (url, data, config = {}) => wrap(api.put(url, data, { ...config, headers: { ...(config.headers || {}), ...headers() } })),
       delete: (url, config = {}) => wrap(api.delete(url, { ...config, headers: { ...(config.headers || {}), ...headers() } })),
     };
-  }, [gajiToken]);
+  }, [gajiToken, payrollGroup]);
 
   if (meta == null) {
     return <div className="min-h-[calc(100vh-60px)] bg-slate-50 flex items-center justify-center text-slate-400">Memuat Portal HRD…</div>;
@@ -94,11 +99,15 @@ export default function HrdPortalPage() {
   }
 
   const access = meta.access || {};
+  const isBoss = !!meta.is_boss;
   const hasGajiAccess = (meta.gaji_group || []).some((k) => access[k] && access[k].view);
+  const gajiOpen = !!gajiToken || isBoss;
   const showDokumen = meta.is_super || (access.hrd_dokumen && access.hrd_dokumen.view);
   const dokCan = meta.is_super ? ALL : (access.hrd_dokumen || {});
 
   const openGaji = () => {
+    // Bos: tanpa PIN — langsung ke pemilih grup / area gaji.
+    if (isBoss) { setSection("gaji"); return; }
     if (gajiToken) { setSection("gaji"); return; }
     // Selalu ke input PIN biasa. Reset PIN hanya lewat tombol khusus di header (bila lupa).
     setGajiPinMode(meta.gaji_pin_set ? "verify" : "create");
@@ -135,7 +144,7 @@ export default function HrdPortalPage() {
           : `w-full px-3 py-2.5 text-left ${isActive ? "bg-slate-800 text-white font-semibold shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}`}>
         <n.icon size={17} weight={isActive ? "fill" : "duotone"} className={isActive ? "" : "text-slate-400"} />
         <span className="flex-1 truncate">{n.label}</span>
-        {n.lock && (gajiToken
+        {n.lock && (gajiOpen
           ? <CheckCircle size={13} weight="fill" className="text-emerald-400" />
           : <LockKey size={13} weight="fill" className={isActive ? "text-white/70" : "text-emerald-500"} />)}
       </button>
@@ -191,7 +200,9 @@ export default function HrdPortalPage() {
             ) : showDokumen ? <DashboardSection /> : (
               <Card className="p-8 text-center text-sm text-slate-500">Selamat datang di Portal HRD. Gunakan menu di samping untuk membuka modul.</Card>
             ))}
-            {section === "gaji" && <GajiArea hapi={hapi} can={ALL} onGoTab={() => {}} />}
+            {section === "gaji" && (isBoss
+              ? <GajiAreaBoss hapi={hapi} can={ALL} groups={meta.payroll_groups || []} group={payrollGroup} onPick={setPayrollGroup} onBack={() => setPayrollGroup(null)} />
+              : <GajiArea hapi={hapi} can={ALL} onGoTab={() => {}} />)}
             {section === "dokumen" && <DokumenHub can={dokCan} />}
             {section === "rekrutmen" && <RekrutmenSection can={dokCan} />}
             {section === "draftai" && <DraftAiSection can={dokCan} />}
@@ -239,6 +250,26 @@ export default function HrdPortalPage() {
 }
 
 /* ============================ Gaji Area (tabs) ============================ */
+const GAJI_GROUP_META = {
+  karyawan: { title: "Gaji dari Herliana", subtitle: "Payroll grup Karyawan", icon: UsersThree, accent: "text-emerald-600", ring: "hover:border-emerald-400" },
+  staff: { title: "Gaji dari Nofia", subtitle: "Payroll grup Staff", icon: Buildings, accent: "text-sky-600", ring: "hover:border-sky-400" },
+};
+
+function GajiTabs({ hapi, can }) {
+  return (
+    <Tabs defaultValue="slip" className="w-full">
+      <TabsList className="mb-4">
+        <TabsTrigger value="slip" data-testid="gaji-tab-slip">Slip Gaji</TabsTrigger>
+        <TabsTrigger value="email" data-testid="gaji-tab-email">Kirim Email</TabsTrigger>
+        <TabsTrigger value="settings" data-testid="gaji-tab-settings">Pengaturan Email</TabsTrigger>
+      </TabsList>
+      <TabsContent value="slip"><PayslipsSection hapi={hapi} can={can} /></TabsContent>
+      <TabsContent value="email"><EmailSection hapi={hapi} can={can} /></TabsContent>
+      <TabsContent value="settings"><SettingsSection hapi={hapi} can={can} /></TabsContent>
+    </Tabs>
+  );
+}
+
 function GajiArea({ hapi, can }) {
   return (
     <div data-testid="hrd-gaji-area">
@@ -247,16 +278,50 @@ function GajiArea({ hapi, can }) {
         <h2 className="text-lg font-bold text-slate-800" style={{ fontFamily: "Chivo, sans-serif" }}>Data Gaji</h2>
         <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 gap-1"><LockKey size={12} weight="fill" /> Area rahasia</Badge>
       </div>
-      <Tabs defaultValue="slip" className="w-full">
-        <TabsList className="mb-4">
-          <TabsTrigger value="slip" data-testid="gaji-tab-slip">Slip Gaji</TabsTrigger>
-          <TabsTrigger value="email" data-testid="gaji-tab-email">Kirim Email</TabsTrigger>
-          <TabsTrigger value="settings" data-testid="gaji-tab-settings">Pengaturan Email</TabsTrigger>
-        </TabsList>
-        <TabsContent value="slip"><PayslipsSection hapi={hapi} can={can} /></TabsContent>
-        <TabsContent value="email"><EmailSection hapi={hapi} can={can} /></TabsContent>
-        <TabsContent value="settings"><SettingsSection hapi={hapi} can={can} /></TabsContent>
-      </Tabs>
+      <GajiTabs hapi={hapi} can={can} />
+    </div>
+  );
+}
+
+/* Bos: pilih grup payroll (2 kartu) lalu kelola gaji grup itu — tanpa PIN. */
+function GajiAreaBoss({ hapi, can, groups, group, onPick, onBack }) {
+  if (!group) {
+    const list = (groups && groups.length ? groups : ["karyawan", "staff"]);
+    return (
+      <div data-testid="hrd-gaji-area">
+        <div className="flex items-center gap-2 mb-1">
+          <Money size={22} weight="duotone" className="text-emerald-600" />
+          <h2 className="text-lg font-bold text-slate-800" style={{ fontFamily: "Chivo, sans-serif" }}>Data Gaji</h2>
+        </div>
+        <p className="text-sm text-slate-500 mb-5">Pilih sumber data gaji yang ingin Anda buka.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+          {list.map((g) => {
+            const m = GAJI_GROUP_META[g] || { title: g, subtitle: `Payroll grup ${g}`, icon: Money, accent: "text-slate-600", ring: "hover:border-slate-400" };
+            return (
+              <button key={g} data-testid={`boss-gaji-card-${g}`} onClick={() => onPick(g)}
+                className={`text-left bg-white border border-slate-200 rounded-xl p-5 transition-all duration-150 hover:shadow-md ${m.ring}`}>
+                <m.icon size={30} weight="duotone" className={m.accent} />
+                <div className="mt-3 text-base font-bold text-slate-800" style={{ fontFamily: "Chivo, sans-serif" }}>{m.title}</div>
+                <div className="text-sm text-slate-500">{m.subtitle}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+  const m = GAJI_GROUP_META[group] || { title: group };
+  return (
+    <div data-testid="hrd-gaji-area">
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <Money size={22} weight="duotone" className="text-emerald-600" />
+        <h2 className="text-lg font-bold text-slate-800" style={{ fontFamily: "Chivo, sans-serif" }}>{m.title}</h2>
+        <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">{group === "karyawan" ? "Karyawan" : "Staff"}</Badge>
+        <Button variant="outline" size="sm" className="ml-auto gap-1.5" onClick={onBack} data-testid="boss-gaji-change-group">
+          <SquaresFour size={15} weight="duotone" /> Ganti Grup
+        </Button>
+      </div>
+      <GajiTabs hapi={hapi} can={can} />
     </div>
   );
 }

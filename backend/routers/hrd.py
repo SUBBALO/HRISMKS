@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from db import db
 from deps import get_current_user, log_action, is_super_admin_user
 from security import hash_password, verify_password, JWT_SECRET, JWT_ALGORITHM
-from services.soft_delete import NOT_DELETED_FILTER, soft_delete_one
+from services.soft_delete import NOT_DELETED_FILTER, soft_delete_one, merged
 
 router = APIRouter(prefix="/hrd", tags=["hrd"])
 
@@ -155,7 +155,10 @@ def _pfilter(group: str) -> dict:
 
 def _can_manage_pin(current: dict) -> bool:
     """Hanya user yang punya akses gaji (Herliana/Nofia) yang boleh set/buat PIN Gaji.
-    Super Admin TIDAK bisa membuat PIN Gaji — ia hanya menyetujui reset."""
+    Super Admin TIDAK bisa membuat PIN Gaji — ia hanya menyetujui reset.
+    Bos multi-grup TIDAK memakai PIN sama sekali."""
+    if _is_boss(current):
+        return False
     acc = current.get("access") or {}
     return any((acc.get(k) or {}).get("view") for k in GAJI_GROUP)
 
@@ -196,7 +199,7 @@ def require_hrd_perm(menu: str, action: str):
     async def _dep(x_hrd_gaji: str = Header(None), current: dict = Depends(require_hrd)) -> dict:
         if not has_perm(current, menu, action):
             raise HTTPException(status_code=403, detail="Anda tidak memiliki hak akses untuk aksi ini")
-        if menu in GAJI_GROUP:
+        if menu in GAJI_GROUP and not _is_boss(current):
             grp = _pgroup(current)
             if await _gaji_pin_is_set(grp) and not _valid_token(x_hrd_gaji, "hrd_gaji", group=grp):
                 raise HTTPException(status_code=401, detail="PIN Gaji diperlukan")
@@ -313,6 +316,8 @@ async def my_access(current: dict = Depends(get_current_user)):
         "gaji_reset_approved": (await db.hrd_pin_resets.count_documents({"status": "approved", "group": _pgroup(current)})) > 0,
         "menus": HRD_MENUS,
         "gaji_group": sorted(GAJI_GROUP),
+        "payroll_groups": _allowed_groups(current),
+        "is_boss": _is_boss(current),
         "access": effective,
     }
 
@@ -587,7 +592,7 @@ def _compute_slip(d: dict) -> dict:
 
 @router.get("/payslips")
 async def list_payslips(month: int = 0, year: int = 0, current: dict = Depends(require_hrd_perm("hrd_slip_gaji", "view"))):
-    flt = {**NOT_DELETED_FILTER, **_pfilter(_pgroup(current))}
+    flt = merged(NOT_DELETED_FILTER, _pfilter(_pgroup(current)))
     if month:
         flt["period_month"] = month
     if year:
@@ -920,7 +925,7 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
         slip["payroll_group"] = grp
         # Upsert berdasarkan (period + nama + grup) agar re-import menimpa, bukan dobel
         existing = await db.hrd_payslips.find_one(
-            {"period_month": month, "period_year": year, "nama": slip["nama"], **NOT_DELETED_FILTER, **_pfilter(grp)})
+            merged({"period_month": month, "period_year": year, "nama": slip["nama"]}, NOT_DELETED_FILTER, _pfilter(grp)))
         slip["updated_at"] = _now()
         if existing:
             slip["email_status"] = existing.get("email_status", "belum")
@@ -1327,7 +1332,7 @@ async def blast(payload: BlastIn, current: dict = Depends(require_hrd_perm("hrd_
     if not smtp_host or not smtp_user or not smtp_pw:
         raise HTTPException(status_code=400, detail="SMTP belum dikonfigurasi. Isi Host, Username & Password di tab Pengaturan Email.")
 
-    flt = {"period_month": payload.month, "period_year": payload.year, **NOT_DELETED_FILTER, **_pfilter(grp)}
+    flt = merged({"period_month": payload.month, "period_year": payload.year}, NOT_DELETED_FILTER, _pfilter(grp))
     if payload.ids:
         flt["id"] = {"$in": payload.ids}
     slips = await db.hrd_payslips.find(flt, {"_id": 0}).to_list(2000)

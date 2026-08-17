@@ -1,0 +1,23 @@
+{
+  "summary": "Frontend-only testing of document download bug fix. Verified: (1) Data Karyawan DOKUMEN download in HrdDokumen.jsx uses Blob + <a download> with blob: URL (no window.open / no navigation to raw https server URL, no HTTP Basic auth popup). (2) Preview dialog fetches /api/hrd/emp-docs/{id}/download via authenticated axios, receives HTTP 200 application/pdf, and renders preview. (3) No WWW-Authenticate header observed on any response; no native browser auth dialog triggered. (4) Login regression OK for heri/123456, herliana/123456, susanto/Subbalo1994. (5) Code-level: /app/frontend/src/pages/HrdPortalPage.jsx lines 250-255 has exactly 3 TabsTrigger (gaji-tab-slip, gaji-tab-email, gaji-tab-settings); gaji-tab-karyawan removed. Gaji PIN area was NOT touched per instructions.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "DocPreviewDialog correctly revokes ObjectURL on cleanup (URL.revokeObjectURL) - good memory hygiene.",
+    "Downloaded blob is used both for preview <img>/<iframe> src and <a download> href - single fetch is efficient."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100%"},
+  "test_credentials": "heri/123456, herliana/123456, susanto/Subbalo1994 (all working)",
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Document download flow verified end-to-end using SUSANTO's Ijazah document. Downloaded href confirmed as blob:https://... The doc-open-{id} testid opens the preview dialog; the download button testid is doc-preview-download. Do not enter Gaji PIN.",
+  "rca of the issue": "Original bug: opening a document via window.open()/new-tab navigation to https://.../api/hrd/emp-docs/{id}/download caused IDM/browser to intercept the URL and issue a fresh request without session cookies (browser strips cookies for external download managers), triggering HTTP 401 with WWW-Authenticate header, which the browser rendered as the native 'Authorization Required' username/password dialog. Fix: DocPreviewDialog and openPdf now fetch the file via authenticated axios (cookie-included) as arraybuffer/blob, construct an in-memory Blob, and set an <a download href='blob:...'> so the browser never re-requests the server URL. Verified via response listener: no WWW-Authenticate header appears and href starts with 'blob:'."
+}

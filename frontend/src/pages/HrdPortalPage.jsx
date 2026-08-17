@@ -250,12 +250,10 @@ function GajiArea({ hapi, can }) {
       <Tabs defaultValue="slip" className="w-full">
         <TabsList className="mb-4">
           <TabsTrigger value="slip" data-testid="gaji-tab-slip">Slip Gaji</TabsTrigger>
-          <TabsTrigger value="karyawan" data-testid="gaji-tab-karyawan">Data Karyawan</TabsTrigger>
           <TabsTrigger value="email" data-testid="gaji-tab-email">Kirim Email</TabsTrigger>
           <TabsTrigger value="settings" data-testid="gaji-tab-settings">Pengaturan Email</TabsTrigger>
         </TabsList>
         <TabsContent value="slip"><PayslipsSection hapi={hapi} can={can} /></TabsContent>
-        <TabsContent value="karyawan"><EmployeesSection hapi={hapi} can={can} /></TabsContent>
         <TabsContent value="email"><EmailSection hapi={hapi} can={can} /></TabsContent>
         <TabsContent value="settings"><SettingsSection hapi={hapi} can={can} /></TabsContent>
       </Tabs>
@@ -562,10 +560,14 @@ function PayslipsSection({ hapi, can }) {
   }, [hapi, month, year]);
   useEffect(() => { load(); }, [load]);
 
-  const openPdf = async (id) => {
+  const openPdf = async (id, nama) => {
     try {
       const r = await hapi.get(`/hrd/payslips/${id}/pdf`, { responseType: "blob" });
-      const url = URL.createObjectURL(r.data); window.open(url, "_blank");
+      const blob = new Blob([r.data], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `SlipGaji_${(nama || id).replace(/\s+/g, "_")}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -682,7 +684,7 @@ function PayslipsSection({ hapi, can }) {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center justify-end gap-1">
                         {can?.edit && <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600" onClick={() => setEditSlip(s)} data-testid={`hrd-slip-edit-${s.id}`}><PencilSimple size={16} /></Button>}
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-sky-600" onClick={() => openPdf(s.id)} data-testid={`hrd-slip-pdf-${s.id}`}><FilePdf size={16} /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-sky-600" onClick={() => openPdf(s.id, s.nama)} data-testid={`hrd-slip-pdf-${s.id}`}><FilePdf size={16} /></Button>
                         {can?.delete && <Button variant="ghost" size="icon" className="h-8 w-8 text-rose-500" onClick={() => setDelId(s.id)} data-testid={`hrd-slip-del-${s.id}`}><Trash size={16} /></Button>}
                       </div>
                     </td>

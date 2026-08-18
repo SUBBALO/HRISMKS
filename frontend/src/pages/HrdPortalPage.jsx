@@ -628,6 +628,7 @@ function EmployeesSection({ hapi, can }) {
 function PeriodPicker({ month, year, setMonth, setYear }) {
   return (
     <div className="flex items-center gap-2">
+      <span className="text-sm font-medium text-slate-500 shrink-0">Periode:</span>
       <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
         <SelectTrigger className="w-36" data-testid="hrd-period-month"><SelectValue /></SelectTrigger>
         <SelectContent>{BULAN.slice(1).map((b, i) => <SelectItem key={i + 1} value={String(i + 1)}>{b}</SelectItem>)}</SelectContent>

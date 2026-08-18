@@ -1213,24 +1213,21 @@ def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
         elems.append(Spacer(1, 5))
         elems.append(Paragraph(f"Catatan : {slip['notes']}", small))
 
-    # Blok validasi digital + QR (tanpa tanda tangan)
+    # Blok validasi digital (tanpa QR — slip gaji tidak memakai QR sesuai kebijakan manajemen)
     elems.append(Spacer(1, 12))
     tgl = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7)))
     tgl_str = f"{tgl.day} {BULAN_ID.get(tgl.month)} {tgl.year}"
     stamp = tgl.strftime("%d-%m-%Y %H:%M") + " WIB"
     no_dok = _slip_no_dok(slip)
     kode = slip.get("kode") or _slip_kode(slip)
-    from reportlab.platypus import Image as _Img
     note_style = ParagraphStyle("nv", parent=styles["Normal"], fontSize=7.5, textColor=GREY, leading=10)
-    qr_img = _Img(_slip_qr(slip, no_dok, kode), width=22 * mm, height=22 * mm)
     info_cell = Paragraph(
         "<b><font size=8>VALIDASI DOKUMEN ELEKTRONIK</font></b><br/>"
         f"Kode Verifikasi : <b>{kode}</b><br/>"
         f"Diterbitkan oleh HRD — PT. Mitra Karya Sarana<br/>"
-        f"Batam, {tgl_str} · {stamp}<br/>"
-        "<i>Pindai QR untuk verifikasi keaslian secara online.</i>",
+        f"Batam, {tgl_str} · {stamp}",
         note_style)
-    valid_tbl = Table([[qr_img, info_cell]], colWidths=[26 * mm, CW - 26 * mm])
+    valid_tbl = Table([[info_cell]], colWidths=[CW])
     valid_tbl.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.5, LINE),
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),

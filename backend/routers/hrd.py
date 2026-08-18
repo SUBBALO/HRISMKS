@@ -147,10 +147,19 @@ def _pin_id(group: str) -> str:
 
 
 def _pfilter(group: str) -> dict:
-    """Filter isolasi slip per grup. 'karyawan' juga mencakup slip lama tanpa penanda."""
-    if group == "karyawan":
-        return {"$or": [{"payroll_group": "karyawan"}, {"payroll_group": {"$exists": False}}, {"payroll_group": None}]}
+    """Filter isolasi slip per grup — STRICT (setiap slip wajib punya payroll_group)."""
     return {"payroll_group": group}
+
+
+def _slip_group(slip: dict) -> str:
+    """Grup payroll sebuah slip; slip lama tanpa penanda dianggap 'karyawan'."""
+    return slip.get("payroll_group") or "karyawan"
+
+
+def _assert_slip_scope(current: dict, slip: dict):
+    """Cegah akses lintas-grup lewat ID (pdf/edit/hapus/detail)."""
+    if _slip_group(slip) not in _allowed_groups(current):
+        raise HTTPException(status_code=403, detail="Slip gaji ini di luar grup payroll Anda")
 
 
 def _can_manage_pin(current: dict) -> bool:
@@ -626,6 +635,7 @@ async def create_payslip(payload: PayslipIn, current: dict = Depends(require_hrd
     d["earnings"] = [e for e in d["earnings"] if (e.get("label") or e.get("amount"))]
     d["deductions"] = [e for e in d["deductions"] if (e.get("label") or e.get("amount"))]
     _compute_slip(d)
+    d["payroll_group"] = _pgroup(current)
     d.update({"id": str(uuid.uuid4()), "email_status": "belum", "email_error": "", "sent_at": None, "created_at": _now(), "updated_at": _now()})
     await db.hrd_payslips.insert_one(dict(d))
     d.pop("_id", None)
@@ -634,11 +644,16 @@ async def create_payslip(payload: PayslipIn, current: dict = Depends(require_hrd
 
 @router.put("/payslips/{sid}")
 async def update_payslip(sid: str, payload: PayslipIn, current: dict = Depends(require_hrd_perm("hrd_slip_gaji", "edit"))):
+    existing = await db.hrd_payslips.find_one({"id": sid, **NOT_DELETED_FILTER}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Slip tidak ditemukan")
+    _assert_slip_scope(current, existing)
     d = payload.dict()
     d["earnings"] = [e for e in d["earnings"] if (e.get("label") or e.get("amount"))]
     d["deductions"] = [e for e in d["deductions"] if (e.get("label") or e.get("amount"))]
     _compute_slip(d)
     d["updated_at"] = _now()
+    d["payroll_group"] = _slip_group(existing)  # grup slip tidak boleh berubah saat edit
     r = await db.hrd_payslips.update_one({"id": sid, **NOT_DELETED_FILTER}, {"$set": d})
     if not r.matched_count:
         raise HTTPException(status_code=404, detail="Slip tidak ditemukan")
@@ -647,6 +662,10 @@ async def update_payslip(sid: str, payload: PayslipIn, current: dict = Depends(r
 
 @router.delete("/payslips/{sid}")
 async def delete_payslip(sid: str, current: dict = Depends(require_hrd_perm("hrd_slip_gaji", "delete"))):
+    existing = await db.hrd_payslips.find_one({"id": sid, **NOT_DELETED_FILTER}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Slip tidak ditemukan")
+    _assert_slip_scope(current, existing)
     ok = await soft_delete_one("hrd_payslips", {"id": sid}, current)
     if not ok:
         raise HTTPException(status_code=404, detail="Slip tidak ditemukan")
@@ -1254,6 +1273,7 @@ async def payslip_pdf(sid: str, current: dict = Depends(require_hrd_perm("hrd_sl
     slip = await db.hrd_payslips.find_one({"id": sid, **NOT_DELETED_FILTER}, {"_id": 0})
     if not slip:
         raise HTTPException(status_code=404, detail="Slip tidak ditemukan")
+    _assert_slip_scope(current, slip)
     if not slip.get("kode"):
         slip["kode"] = _slip_kode(slip)
         await db.hrd_payslips.update_one({"id": sid}, {"$set": {"kode": slip["kode"]}})

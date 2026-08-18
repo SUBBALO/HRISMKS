@@ -906,9 +906,8 @@ export function VerifySection() {
               <div><b>No. Dokumen:</b> {result.slip.no_dok}</div>
               <div><b>Nama:</b> {result.slip.nama} {result.slip.nik ? `(${result.slip.nik})` : ""}</div>
               <div><b>Periode:</b> {result.slip.periode}</div>
-              <div><b>Take Home Pay:</b> {rp(result.slip.take_home)}</div>
             </div>
-            <div className="text-[11px] text-emerald-700 mt-2">Cocokkan nama & nominal di atas dengan slip yang diterima.</div>
+            <div className="text-[11px] text-emerald-700 mt-2">Cocokkan data di atas dengan slip yang diterima.</div>
           </div>
         )}
         {result && result.kind === "letter" && (

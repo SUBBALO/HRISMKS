@@ -1278,7 +1278,7 @@ async def verify_payslip(payload: SlipVerifyIn, current: dict = Depends(require_
     per = f"{BULAN_ID.get(slip.get('period_month'), slip.get('period_month'))} {slip.get('period_year')}"
     return {"valid": True, "slip": {
         "no_dok": _slip_no_dok(slip), "nama": slip.get("nama", ""), "nik": slip.get("nik", ""),
-        "periode": per, "take_home": slip.get("take_home"), "kode": kode}}
+        "periode": per, "kode": kode}}
 
 
 @router.get("/verify/{kode}")
@@ -1300,7 +1300,7 @@ async def public_verify(kode: str):
         per = f"{BULAN_ID.get(slip.get('period_month'), slip.get('period_month'))} {slip.get('period_year')}"
         return {"valid": True, "type": "slip", "data": {
             "no_dok": _slip_no_dok(slip), "nama": slip.get("nama", ""), "nik": slip.get("nik", ""),
-            "periode": per, "take_home": slip.get("take_home")}}
+            "periode": per}}
     return {"valid": False, "message": "Kode tidak terdaftar. Dokumen tidak dikenali sistem HRD."}
 
 

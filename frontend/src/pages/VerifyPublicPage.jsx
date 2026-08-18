@@ -69,9 +69,8 @@ export default function VerifyPublicPage() {
                 <div><b>No. Dokumen:</b> {res.data.no_dok}</div>
                 <div><b>Nama:</b> {res.data.nama} {res.data.nik ? `(${res.data.nik})` : ""}</div>
                 <div><b>Periode:</b> {res.data.periode}</div>
-                <div><b>Take Home Pay:</b> {rp(res.data.take_home)}</div>
               </div>
-              <div className="text-[11px] text-emerald-700 mt-2">Cocokkan nama & nominal dengan slip yang diterima.</div>
+              <div className="text-[11px] text-emerald-700 mt-2">Cocokkan data di atas dengan slip yang diterima.</div>
             </div>
           )}
           {res && !res.valid && (

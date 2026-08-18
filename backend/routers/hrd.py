@@ -1058,12 +1058,19 @@ def _watermark(canvas, doc):
     w2, h2 = A4
     canvas.setStrokeColorRGB(0.80, 0.84, 0.88)
     canvas.setLineWidth(0.5)
-    canvas.line(16 * 2.8346, 34, w2 - 16 * 2.8346, 34)
-    canvas.setFont("Helvetica", 6.8)
+    x0 = 16 * 2.8346
+    canvas.line(x0, 34, w2 - x0, 34)
+    footer = ("Dokumen ini diterbitkan secara otomatis melalui HRIS PT Mitra Karya Sarana dan sah tanpa memerlukan tanda tangan basah. "
+              "| RAHASIA — Dokumen pribadi, tidak untuk disebarluaskan.")
+    avail = (w2 - 2 * x0) - 42  # sisakan ruang utk "Hal. N" di kanan
+    fs = 6.8
+    while fs > 4.5 and canvas.stringWidth(footer, "Helvetica", fs) > avail:
+        fs -= 0.1
+    canvas.setFont("Helvetica", fs)
     canvas.setFillColorRGB(0.42, 0.45, 0.50)
-    canvas.drawString(16 * 2.8346, 24,
-                      "Dokumen otomatis dari HRIS PT Mitra Karya Sarana — Sah tanpa tanda tangan basah | RAHASIA — Tidak untuk disebarluaskan")
-    canvas.drawRightString(w2 - 16 * 2.8346, 24, f"Hal. {canvas.getPageNumber()}")
+    canvas.drawString(x0, 24, footer)
+    canvas.setFont("Helvetica", 6.8)
+    canvas.drawRightString(w2 - x0, 24, f"Hal. {canvas.getPageNumber()}")
     canvas.restoreState()
 
 

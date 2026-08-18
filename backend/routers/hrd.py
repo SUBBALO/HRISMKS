@@ -128,12 +128,27 @@ def _allowed_groups(current: dict) -> list:
 
 
 def _is_boss(current: dict) -> bool:
-    """Bos = user dengan akses lebih dari satu grup payroll (tanpa PIN Gaji)."""
+    """Master multi-grup = user dengan akses lebih dari satu grup payroll (lihat 2 kartu)."""
     return len(_allowed_groups(current)) > 1
 
 
+def _pin_bypass(current: dict) -> bool:
+    """Hanya akun dengan flag payroll_no_pin (mis. bos Asiong) yang lolos tanpa PIN Gaji."""
+    return bool(current.get("payroll_no_pin"))
+
+
+def _home_group(current: dict) -> str:
+    """Grup 'rumah' user untuk urusan PIN (independen dari grup yang sedang dipilih)."""
+    return current.get("payroll_group") or _allowed_groups(current)[0]
+
+
+def _pin_group(current: dict) -> str:
+    """Grup acuan untuk operasi PIN. Master multi-grup dikunci PIN grup rumahnya."""
+    return _home_group(current) if _is_boss(current) else _pgroup(current)
+
+
 def _pgroup(current: dict) -> str:
-    """Grup payroll aktif. Bos multi-grup memilih via header x-payroll-group.
+    """Grup payroll aktif. Master multi-grup memilih via header x-payroll-group.
     User biasa: 'karyawan' (Herliana, default) atau 'staff' (Nofia)."""
     allowed = _allowed_groups(current)
     ag = current.get("_active_group")
@@ -163,10 +178,10 @@ def _assert_slip_scope(current: dict, slip: dict):
 
 
 def _can_manage_pin(current: dict) -> bool:
-    """Hanya user yang punya akses gaji (Herliana/Nofia) yang boleh set/buat PIN Gaji.
+    """User yang punya akses gaji boleh set/buat PIN Gaji grup rumahnya.
     Super Admin TIDAK bisa membuat PIN Gaji — ia hanya menyetujui reset.
-    Bos multi-grup TIDAK memakai PIN sama sekali."""
-    if _is_boss(current):
+    Akun tanpa-PIN (bos Asiong) tidak mengelola PIN."""
+    if _pin_bypass(current):
         return False
     acc = current.get("access") or {}
     return any((acc.get(k) or {}).get("view") for k in GAJI_GROUP)
@@ -208,10 +223,16 @@ def require_hrd_perm(menu: str, action: str):
     async def _dep(x_hrd_gaji: str = Header(None), current: dict = Depends(require_hrd)) -> dict:
         if not has_perm(current, menu, action):
             raise HTTPException(status_code=403, detail="Anda tidak memiliki hak akses untuk aksi ini")
-        if menu in GAJI_GROUP and not _is_boss(current):
-            grp = _pgroup(current)
-            if await _gaji_pin_is_set(grp) and not _valid_token(x_hrd_gaji, "hrd_gaji", group=grp):
-                raise HTTPException(status_code=401, detail="PIN Gaji diperlukan")
+        if menu in GAJI_GROUP and not _pin_bypass(current):
+            if _is_boss(current):
+                # Master multi-grup: satu PIN grup rumah membuka semua grupnya (token per-uid).
+                hg = _pin_group(current)
+                if await _gaji_pin_is_set(hg) and not _valid_token(x_hrd_gaji, "hrd_gaji", uid=current.get("id")):
+                    raise HTTPException(status_code=401, detail="PIN Gaji diperlukan")
+            else:
+                grp = _pgroup(current)
+                if await _gaji_pin_is_set(grp) and not _valid_token(x_hrd_gaji, "hrd_gaji", group=grp):
+                    raise HTTPException(status_code=401, detail="PIN Gaji diperlukan")
         return current
     return _dep
 
@@ -256,7 +277,7 @@ async def set_pin(payload: PinIn, current: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Hanya user Gaji (mis. Herliana) atau Super Admin yang bisa mengatur PIN Gaji")
     if not payload.pin or len(payload.pin) < 4:
         raise HTTPException(status_code=400, detail="PIN minimal 4 digit")
-    grp = _pgroup(current)
+    grp = _pin_group(current)
     pid = _pin_id(grp)
     s = await db.hrd_settings.find_one({"_id": pid})
     # Bila ada persetujuan reset dari Super Admin (untuk grup ini), boleh set PIN baru TANPA PIN lama.
@@ -273,7 +294,7 @@ async def set_pin(payload: PinIn, current: dict = Depends(get_current_user)):
 
 @router.post("/verify-pin")
 async def verify_pin(payload: PinIn, current: dict = Depends(require_hrd)):
-    grp = _pgroup(current)
+    grp = _pin_group(current)
     s = await db.hrd_settings.find_one({"_id": _pin_id(grp)})
     if not s or not s.get("pin_hash"):
         raise HTTPException(status_code=400, detail="PIN Gaji belum diatur.")
@@ -289,7 +310,7 @@ async def verify_pin(payload: PinIn, current: dict = Depends(require_hrd)):
 async def pin_status(current: dict = Depends(get_current_user)):
     return {
         "portal_pin_set": bool(current.get("hrd_pin_hash")),
-        "gaji_pin_set": await _gaji_pin_is_set(_pgroup(current)),
+        "gaji_pin_set": await _gaji_pin_is_set(_pin_group(current)),
         "can_manage_gaji_pin": _can_manage_pin(current),
         "is_super": _is_super(current),
     }
@@ -318,15 +339,16 @@ async def my_access(current: dict = Depends(get_current_user)):
     return {
         "is_super": is_super,
         "can_enter": is_super or _has_any_hrd(current),
-        "gaji_pin_set": await _gaji_pin_is_set(_pgroup(current)),
+        "gaji_pin_set": await _gaji_pin_is_set(_pin_group(current)),
         "can_manage_gaji_pin": _can_manage_pin(current),
         "can_approve_reset": is_super,
         "gaji_reset_pending": await db.hrd_pin_resets.count_documents({"status": "pending"}),
-        "gaji_reset_approved": (await db.hrd_pin_resets.count_documents({"status": "approved", "group": _pgroup(current)})) > 0,
+        "gaji_reset_approved": (await db.hrd_pin_resets.count_documents({"status": "approved", "group": _pin_group(current)})) > 0,
         "menus": HRD_MENUS,
         "gaji_group": sorted(GAJI_GROUP),
         "payroll_groups": _allowed_groups(current),
         "is_boss": _is_boss(current),
+        "pin_bypass": _pin_bypass(current),
         "access": effective,
     }
 
@@ -340,7 +362,7 @@ class ResetReqIn(BaseModel):
 async def request_gaji_pin_reset(payload: ResetReqIn, current: dict = Depends(require_hrd)):
     if not _can_manage_pin(current):
         raise HTTPException(status_code=403, detail="Hanya user Gaji (Herliana) yang bisa mengajukan reset PIN")
-    grp = _pgroup(current)
+    grp = _pin_group(current)
     existing = await db.hrd_pin_resets.find_one({"group": grp, "status": {"$in": ["pending", "approved"]}})
     if existing:
         raise HTTPException(status_code=400, detail="Sudah ada permintaan reset yang sedang diproses")
@@ -398,7 +420,7 @@ class ResetApplyIn(BaseModel):
 async def apply_gaji_pin_reset(payload: ResetApplyIn, current: dict = Depends(require_hrd)):
     if not _can_manage_pin(current):
         raise HTTPException(status_code=403, detail="Hanya user Gaji (Herliana) yang bisa membuat PIN baru")
-    grp = _pgroup(current)
+    grp = _pin_group(current)
     approved = await db.hrd_pin_resets.count_documents({"status": "approved", "group": grp})
     if not approved:
         raise HTTPException(status_code=400, detail="Belum ada persetujuan reset dari Super Admin (Susanto)")

@@ -100,14 +100,20 @@ export default function HrdPortalPage() {
 
   const access = meta.access || {};
   const isBoss = !!meta.is_boss;
+  const pinBypass = !!meta.pin_bypass;
   const hasGajiAccess = (meta.gaji_group || []).some((k) => access[k] && access[k].view);
-  const gajiOpen = !!gajiToken || isBoss;
+  const gajiOpen = !!gajiToken || (isBoss && pinBypass);
   const showDokumen = meta.is_super || (access.hrd_dokumen && access.hrd_dokumen.view);
   const dokCan = meta.is_super ? ALL : (access.hrd_dokumen || {});
 
   const openGaji = () => {
-    // Bos: tanpa PIN — klik "Data Gaji" selalu kembali ke pemilih 2 grup.
-    if (isBoss) { setPayrollGroup(null); setSection("gaji"); return; }
+    if (isBoss) {
+      // Master tanpa PIN (bos Asiong) → langsung ke 2 kartu.
+      if (pinBypass || gajiToken) { setPayrollGroup(null); setSection("gaji"); return; }
+      // Master dengan PIN (Nofia) → minta PIN dulu, baru muncul 2 kartu.
+      setGajiPinMode(meta.gaji_pin_set ? "verify" : "create");
+      return;
+    }
     if (gajiToken) { setSection("gaji"); return; }
     // Selalu ke input PIN biasa. Reset PIN hanya lewat tombol khusus di header (bila lupa).
     setGajiPinMode(meta.gaji_pin_set ? "verify" : "create");
@@ -221,12 +227,12 @@ export default function HrdPortalPage() {
         onCreate={async (pin) => {
           await api.post("/hrd/set-pin", { pin });
           const r = await api.post("/hrd/verify-pin", { pin });
-          setGajiToken(r.data.gaji_token); setGajiPinMode(null); setSection("gaji"); await loadMeta();
+          setGajiToken(r.data.gaji_token); setGajiPinMode(null); setPayrollGroup(null); setSection("gaji"); await loadMeta();
           toast.success("PIN Gaji dibuat & menu Gaji terbuka");
         }}
         onVerify={async (pin) => {
           const r = await api.post("/hrd/verify-pin", { pin });
-          setGajiToken(r.data.gaji_token); setGajiPinMode(null); setSection("gaji");
+          setGajiToken(r.data.gaji_token); setGajiPinMode(null); setPayrollGroup(null); setSection("gaji");
         }}
         onRequestReset={async () => {
           await api.post("/hrd/gaji-pin/request-reset", { reason: "Lupa PIN Gaji — mohon reset" });

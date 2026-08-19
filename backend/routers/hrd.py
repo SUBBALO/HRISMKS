@@ -57,8 +57,13 @@ def _smtp_friendly(err: str) -> str:
         return "Autentikasi diperlukan. Isi Username & Password SMTP di Pengaturan Email."
     if "5.1.1" in e or "does not exist" in low or "no such user" in low:
         return "Alamat email tujuan tidak ditemukan. Periksa kembali email karyawan."
-    if "getaddrinfo" in low or "name or service not known" in low or "connection refused" in low or "timed out" in low or "timeout" in low:
-        return "Gagal terhubung ke server SMTP. Periksa SMTP Host, Port, dan pilihan Keamanan (SSL/TLS)."
+    if ("getaddrinfo" in low or "name or service not known" in low or "connection refused" in low
+            or "timed out" in low or "timeout" in low or "10060" in e or "10061" in e
+            or "did not properly respond" in low or "failed to respond" in low or "winerror" in low
+            or "network is unreachable" in low or "no route to host" in low):
+        return ("Gagal terhubung ke server SMTP (koneksi habis waktu/tidak merespons). "
+                "Periksa SMTP Host & Port, pastikan tidak diblokir firewall/antivirus atau ISP, "
+                "dan sesuaikan pilihan Keamanan (SSL port 465 / TLS port 587).")
     if "wrong version number" in low or "ssl" in low:
         return "Kesalahan SSL/TLS. Untuk port 465 pilih SSL, untuk port 587 pilih TLS (STARTTLS)."
     return e[:220]

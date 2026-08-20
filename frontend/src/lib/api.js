@@ -15,8 +15,8 @@ api.interceptors.response.use(
       try {
         await api.post("/auth/refresh");
         return api(err.config);
-      } catch {
-        // fall through
+      } catch (e) {
+        console.debug("Session refresh failed; propagating original 401", e);
       }
     }
     return Promise.reject(err);

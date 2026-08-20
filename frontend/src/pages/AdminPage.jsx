@@ -28,7 +28,20 @@ const ROLES = [
 ];
 const ACTION_LABEL = { view: "Lihat", create: "Buat", edit: "Edit", delete: "Hapus", report: "Laporan/PDF" };
 const GAJI_KEYS = ["hrd_karyawan", "hrd_slip_gaji", "hrd_email", "hrd_settings"];
-const EMPTY = { username: "", password: "", name: "", role: "hrd", access: {} };
+const PAYROLL_OPTIONS = [
+  { v: "none", l: "Tidak ada (bukan user gaji)" },
+  { v: "karyawan", l: "Karyawan (1 grup) — pakai PIN" },
+  { v: "staff", l: "Staff (1 grup) — pakai PIN" },
+  { v: "master", l: "MASTER — lihat 2 grup, tetap pakai PIN" },
+  { v: "bos", l: "BOS — lihat 2 grup, TANPA PIN" },
+];
+const PAYROLL_BADGE = {
+  master: { l: "MASTER", c: "bg-indigo-100 text-indigo-700" },
+  bos: { l: "BOS", c: "bg-purple-100 text-purple-700" },
+  karyawan: { l: "Gaji: Karyawan", c: "bg-emerald-100 text-emerald-700" },
+  staff: { l: "Gaji: Staff", c: "bg-sky-100 text-sky-700" },
+};
+const EMPTY = { username: "", password: "", name: "", role: "hrd", access: {}, payroll_access: "none" };
 
 /* ============ Access matrix editor (granular per menu/action) ============ */
 export function HrdAccessMatrix({ defs, access, onChange }) {
@@ -120,7 +133,7 @@ export default function AdminPage() {
 
   const openNew = () => { setForm(EMPTY); setEditId(null); setActive(true); setDlg(true); };
   const openEdit = (u) => {
-    setForm({ username: u.username, password: "", name: u.name, role: u.role, access: u.access || {} });
+    setForm({ username: u.username, password: "", name: u.name, role: u.role, access: u.access || {}, payroll_access: u.payroll_access || "none" });
     setEditId(u.id); setActive(u.active !== false); setDlg(true);
   };
   const save = async () => {
@@ -129,11 +142,11 @@ export default function AdminPage() {
     setBusy(true);
     try {
       if (editId) {
-        const body = { name: form.name, role: form.role, access: form.access, active };
+        const body = { name: form.name, role: form.role, access: form.access, active, payroll_access: form.payroll_access };
         if (form.password) body.password = form.password;
         await api.put(`/users/${editId}`, body);
       } else {
-        await api.post("/users", { username: form.username, password: form.password, name: form.name, role: form.role, access: form.access });
+        await api.post("/users", { username: form.username, password: form.password, name: form.name, role: form.role, access: form.access, payroll_access: form.payroll_access });
       }
       toast.success("User tersimpan"); setDlg(false); load();
     } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
@@ -191,7 +204,12 @@ export default function AdminPage() {
                     <td className="px-4 py-2.5 font-medium text-slate-800">{u.username}</td>
                     <td className="px-4 py-2.5 text-slate-600">{u.name}</td>
                     <td className="px-4 py-2.5">{roleBadge(u.role)}</td>
-                    <td className="px-4 py-2.5">{accessSummary(u.access)}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {accessSummary(u.access)}
+                        {PAYROLL_BADGE[u.payroll_access] && <Badge className={`${PAYROLL_BADGE[u.payroll_access].c} hover:${PAYROLL_BADGE[u.payroll_access].c} text-[10px]`}>{PAYROLL_BADGE[u.payroll_access].l}</Badge>}
+                      </div>
+                    </td>
                     <td className="px-4 py-2.5 text-center">{u.active === false ? <Badge variant="secondary" className="text-rose-500">Nonaktif</Badge> : <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Aktif</Badge>}</td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center justify-end gap-1">
@@ -236,6 +254,14 @@ export default function AdminPage() {
                 <Label className="!mb-0">Akun Aktif</Label>
               </div>
             )}
+            <div>
+              <Label>Akses Gaji (Payroll)</Label>
+              <Select value={form.payroll_access || "none"} onValueChange={(v) => setForm({ ...form, payroll_access: v })}>
+                <SelectTrigger data-testid="admin-f-payroll"><SelectValue /></SelectTrigger>
+                <SelectContent>{PAYROLL_OPTIONS.map((o) => <SelectItem key={o.v} value={o.v}>{o.l}</SelectItem>)}</SelectContent>
+              </Select>
+              <p className="text-xs text-slate-500 mt-1"><b>MASTER</b> & <b>BOS</b> otomatis melihat 2 kartu gaji (Karyawan + Staff) dan menu gaji langsung aktif. <b>MASTER</b> tetap butuh PIN Gaji grupnya; <b>BOS</b> tanpa PIN.</p>
+            </div>
             <div>
               <Label className="mb-2 block">Hak Akses Portal HRD (per menu / aksi)</Label>
               <HrdAccessMatrix defs={defs} access={form.access} onChange={(a) => setForm({ ...form, access: a })} />

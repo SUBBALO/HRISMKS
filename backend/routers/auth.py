@@ -177,6 +177,48 @@ async def refresh_token(request: Request, response: Response):
 
 
 # ---------------- Users (super admin) ----------------
+PAYROLL_PRESETS = {
+    "none": {"groups": [], "no_pin": False},
+    "karyawan": {"groups": ["karyawan"], "no_pin": False},
+    "staff": {"groups": ["staff"], "no_pin": False},
+    "master": {"groups": ["staff", "karyawan"], "no_pin": False},
+    "bos": {"groups": ["karyawan", "staff"], "no_pin": True},
+}
+GAJI_ACCESS_KEYS = ["hrd_slip_gaji", "hrd_email", "hrd_settings"]
+_ALL_ACT = {"view": True, "create": True, "edit": True, "delete": True, "report": True}
+
+
+def _apply_payroll_access(doc: dict, level: str, access: dict) -> dict:
+    """Terjemahkan pilihan 'Akses Gaji' menjadi field payroll + pastikan menu gaji ada di access."""
+    preset = PAYROLL_PRESETS.get(level)
+    access = dict(access or {})
+    if preset is None:
+        return access
+    groups = preset["groups"]
+    if groups:
+        doc["payroll_groups"] = groups
+        doc["payroll_group"] = groups[0]
+        doc["payroll_no_pin"] = preset["no_pin"]
+        for k in GAJI_ACCESS_KEYS:
+            if not (access.get(k) or {}).get("view"):
+                access[k] = dict(_ALL_ACT)
+    else:
+        doc["payroll_groups"] = []
+        doc["payroll_group"] = None
+        doc["payroll_no_pin"] = False
+        for k in GAJI_ACCESS_KEYS + ["hrd_karyawan"]:
+            access.pop(k, None)
+    return access
+
+
+def _payroll_level(u: dict) -> str:
+    groups = u.get("payroll_groups")
+    if isinstance(groups, list) and len(groups) > 1:
+        return "bos" if u.get("payroll_no_pin") else "master"
+    single = groups[0] if isinstance(groups, list) and groups else u.get("payroll_group")
+    return single if single in ("karyawan", "staff") else "none"
+
+
 def _sanitize_user(u: dict) -> dict:
     return {
         "id": u["id"],
@@ -185,6 +227,7 @@ def _sanitize_user(u: dict) -> dict:
         "role": u.get("role", "hrd"),
         "active": u.get("active", True),
         "access": u.get("access") or {},
+        "payroll_access": _payroll_level(u),
         "must_change_password": bool(u.get("must_change_password")),
         "created_at": u.get("created_at", ""),
     }
@@ -218,6 +261,8 @@ async def create_user(payload: UserCreate, current: dict = Depends(require_super
         "must_change_password": bool(payload.must_change_password),
         "created_at": _now_iso(),
     }
+    if payload.payroll_access is not None:
+        user_doc["access"] = _apply_payroll_access(user_doc, payload.payroll_access, user_doc["access"])
     await db.users.insert_one(user_doc.copy())
     await log_action(current, "create_user", "user", user_doc["id"], {"username": username, "role": role})
     return _sanitize_user(user_doc)
@@ -246,6 +291,12 @@ async def update_user(user_id: str, payload: UserUpdate, current: dict = Depends
     if payload.access is not None:
         updates["access"] = dict(payload.access)
         changed["access"] = "updated"
+    if payload.payroll_access is not None:
+        base_access = payload.access if payload.access is not None else (user.get("access") or {})
+        doc_updates: dict = {}
+        updates["access"] = _apply_payroll_access(doc_updates, payload.payroll_access, base_access)
+        updates.update(doc_updates)  # payroll_groups, payroll_group, payroll_no_pin
+        changed["payroll_access"] = payload.payroll_access
     if payload.password:
         if len(payload.password) < 6:
             raise HTTPException(status_code=400, detail="Password minimal 6 karakter")

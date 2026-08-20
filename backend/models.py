@@ -14,6 +14,7 @@ class UserCreate(BaseModel):
     name: Optional[str] = ""
     role: Optional[str] = "hrd"
     access: Optional[dict] = None
+    payroll_access: Optional[str] = None
     must_change_password: Optional[bool] = None
 
 
@@ -23,3 +24,4 @@ class UserUpdate(BaseModel):
     active: Optional[bool] = None
     password: Optional[str] = None
     access: Optional[dict] = None
+    payroll_access: Optional[str] = None

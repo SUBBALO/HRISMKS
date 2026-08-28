@@ -1,0 +1,24 @@
+{
+  "summary": "Iteration 4 regression test after the build-tooling-only change (frontend/craco.config.js guarded Web Crypto polyfill for Node <20 + frontend/.yarnrc '--ignore-engines true'). Backend: new pytest suite (12 tests) covering login herliana/123456, /auth/me guard, wrong password, PIN Gaji guard (payslips blocked without x-hrd-gaji, wrong PIN rejected), gaji_trial.xlsx import for 10/2026 (3 slips: Wawan Munandar, Harjono, Rahmat Ari Sandi NST — all with valid non-empty emails), Rahmat slip PDF contains 'T. Transport' + name, bulk-delete cleanup, plus static/runtime checks that craco.config.js loads under NODE_ENV=production on the current Node (20.20.2) and the polyfill guard + .yarnrc entry are present. Re-ran the 4 previous payroll suites (30 tests) — all pass. Frontend: full Playwright E2E on the public preview URL — login page renders, HRD portal loads, Data Gaji unlocked with PIN 1234, period switched to Oktober/2026, Excel upload created exactly 3 rows (Tanpa Email = 0, Total Take Home Rp 14.031.000), checkbox column + 'Hapus Terpilih (n)' bulk delete work (0 rows after delete), Rahmat PDF downloaded (valid %PDF, text contains 'T. Transport'), and all 8 HRD menus navigate without runtime errors. No regression found.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "test_report_links": [
+    "/app/backend/tests/test_build_tooling_regression.py",
+    "/app/test_reports/pytest/iteration4.xml",
+    "/app/test_reports/pytest/iteration4_prev.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "craco.config.js polyfill is correctly guarded (typeof globalThis.crypto / getRandomValues) so Node 20+ preview is unaffected; verified by loading the config with NODE_ENV=production on Node 20.20.2 — no error, crypto.getRandomValues stays a function.",
+    "frontend/.yarnrc uses the Yarn-1 CLI-flag form '--ignore-engines true' (note: not readable via 'yarn config get', which is expected behaviour for .yarnrc flags) — no parse errors from yarn 1.22.22.",
+    "HrdPortalPage.jsx is ~1169 lines — consider splitting PayslipsSection / PeriodPicker / PIN dialogs into separate modules (maintainability only, not a defect)."
+  ],
+  "updated_files": ["/app/backend/tests/test_build_tooling_regression.py"],
+  "success_rate": { "backend": "100% (42/42: 12 new + 30 prior payroll tests)", "frontend": "100% (all E2E assertions passed)" },
+  "seed_data_creation": "Imported gaji_trial.xlsx into period 10/2026 twice (API + UI); both sets bulk-deleted afterwards. Temporary downloaded PDF removed. No leftover test data.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": false,
+  "test_credentials": "herliana / 123456 (PIN Gaji 1234) from /app/memory/test_credentials.md",
+  "context_for_next_testing_agent": "Build-tooling change verified with zero regressions. Reusable suite: /app/backend/tests/test_build_tooling_regression.py (period 10/2026, self-cleaning). Login response returns user fields at top level (no nested 'user' object) — assert accordingly. Only console message during E2E is an expected 401 from the pre-login /auth/me bootstrap call (benign). The `yarn build` on Node 18 could not be re-verified here because the container runs Node 20.20.2; the polyfill path was exercised only via the guard/static check.",
+  "rca_of_the_issue": "N/A — no defects reproduced this iteration."
+}

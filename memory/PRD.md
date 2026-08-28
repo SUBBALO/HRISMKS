@@ -87,3 +87,12 @@ Extract ONLY the HRD module from an existing ERP (github.com/SUBBALO/PROCUREMENT
 ### Test credentials
 - herliana / 123456 (payroll group `karyawan`, PIN Gaji `1234`); susanto / Subbalo1994 (super admin). Sample payroll file: `/app/backend/tmp_uploads/gaji_trial.xlsx`.
 
+
+
+### Node 18 build compatibility (June 2026)
+- **Masalah:** di server Windows (Node v18.12.0), `yarn install` gagal (engines>=20) dan `yarn build` gagal `ReferenceError: crypto is not defined` (serialize-javascript@7.0.5 via terser-webpack-plugin memakai global `crypto.getRandomValues`, hanya default di Node 20+).
+- **Fix (tanpa ubah versi dependency / fitur):**
+  - `frontend/craco.config.js`: polyfill `globalThis.crypto = require('crypto').webcrypto` untuk Node <20, dijaga `if` (Node 20+ tak terpengaruh). serialize-javascript dipakai terser di **main thread**, jadi polyfill main-thread sudah cukup.
+  - `frontend/.yarnrc`: `--ignore-engines true` → `yarn install` jalan tanpa flag manual.
+- **Verifikasi (Node 18.12.0):** `yarn install` bersih tanpa `--ignore-engines`; `yarn build` "Compiled successfully" (8 CPU, worker paralel aktif). Node 20 preview tetap normal. Testing agent: 42/42 backend + E2E frontend, tanpa regresi (iteration_4).
+- **Belum dilakukan:** push ke GitHub (perlu aksi user via fitur "Save to GitHub").

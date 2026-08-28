@@ -2,6 +2,19 @@
 const path = require("path");
 require("dotenv").config();
 
+// --- Kompatibilitas Node < 20: sediakan global Web Crypto ---
+// serialize-javascript@7 (dipakai Terser saat `yarn build`) memanggil global
+// `crypto.getRandomValues`, yang baru tersedia default sejak Node 20. Polyfill ini
+// membuat `yarn build` berjalan di Node 18 tanpa upgrade Node & tanpa mengubah
+// dependency. Dijaga `if` agar Node 20+ (yang sudah punya global crypto) tak terpengaruh.
+if (
+  typeof globalThis.crypto === "undefined" ||
+  typeof globalThis.crypto.getRandomValues !== "function"
+) {
+  // eslint-disable-next-line global-require
+  globalThis.crypto = require("crypto").webcrypto;
+}
+
 // Check if we're in development/preview mode (not production build)
 // Craco sets NODE_ENV=development for start, NODE_ENV=production for build
 const isDevServer = process.env.NODE_ENV !== "production";

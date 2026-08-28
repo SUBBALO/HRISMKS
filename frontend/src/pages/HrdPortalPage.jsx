@@ -650,10 +650,12 @@ function PayslipsSection({ hapi, can }) {
   const [importing, setImporting] = useState(false);
   const [delId, setDelId] = useState(null);
   const [editSlip, setEditSlip] = useState(null);
+  const [sel, setSel] = useState({});
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await hapi.get("/hrd/payslips", { params: { month, year } }); setItems(r.data.items || []); }
+    try { const r = await hapi.get("/hrd/payslips", { params: { month, year } }); setItems(r.data.items || []); setSel({}); }
     catch (e) { toast.error(errMsg(e)); } finally { setLoading(false); }
   }, [hapi, month, year]);
   useEffect(() => { load(); }, [load]);
@@ -696,11 +698,24 @@ function PayslipsSection({ hapi, can }) {
     : s === "gagal" ? <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100 gap-1"><XCircle size={12} weight="fill" /> Gagal</Badge>
       : <Badge variant="secondary" className="text-slate-500">Belum</Badge>;
 
+  const selectedIds = items.filter((s) => sel[s.id]).map((s) => s.id);
+  const allChecked = items.length > 0 && selectedIds.length === items.length;
+  const doBulkDelete = async () => {
+    try {
+      const r = await hapi.post("/hrd/payslips/bulk-delete", { ids: selectedIds });
+      toast.success(`${r.data.deleted} slip dihapus`);
+      setBulkOpen(false); setSel({}); load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
   return (
     <div data-testid="hrd-payslips">
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <div className="flex items-center gap-3"><h2 className="text-base font-bold text-slate-800">Slip Gaji</h2><PeriodPicker month={month} year={year} setMonth={setMonth} setYear={setYear} /></div>
         <div className="flex items-center gap-2 flex-wrap">
+          {can?.delete && selectedIds.length > 0 && (
+            <Button variant="outline" size="sm" className="gap-1.5 border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700" onClick={() => setBulkOpen(true)} data-testid="hrd-slip-bulk-del-btn"><Trash size={15} /> Hapus Terpilih ({selectedIds.length})</Button>
+          )}
           <Button variant="outline" size="sm" className="gap-1.5" onClick={downloadTemplate} data-testid="hrd-tmpl-btn"><DownloadSimple size={15} /> Template</Button>
           {can?.create && (
             <label className="inline-flex">
@@ -750,6 +765,7 @@ function PayslipsSection({ hapi, can }) {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
             <tr>
+              <th className="px-4 py-2.5 w-10 text-left"><Checkbox checked={allChecked ? true : (selectedIds.length > 0 ? "indeterminate" : false)} onCheckedChange={(v) => { const n = {}; if (v) items.forEach((s) => { n[s.id] = true; }); setSel(n); }} data-testid="hrd-slip-checkall" /></th>
               <th className="text-left px-4 py-2.5 font-semibold">Nama</th>
               <th className="text-left px-4 py-2.5 font-semibold">Jabatan</th>
               <th className="text-right px-4 py-2.5 font-semibold">Penghasilan</th>
@@ -760,10 +776,11 @@ function PayslipsSection({ hapi, can }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {loading ? (<tr><td colSpan={7} className="text-center py-10 text-slate-400">Memuat…</td></tr>)
-              : items.length === 0 ? (<tr><td colSpan={7} className="text-center py-10 text-slate-400">Belum ada slip untuk {BULAN[month]} {year}. Klik "Upload Excel".</td></tr>)
+            {loading ? (<tr><td colSpan={8} className="text-center py-10 text-slate-400">Memuat…</td></tr>)
+              : items.length === 0 ? (<tr><td colSpan={8} className="text-center py-10 text-slate-400">Belum ada slip untuk {BULAN[month]} {year}. Klik "Upload Excel".</td></tr>)
                 : items.map((s) => (
                   <tr key={s.id} className="hover:bg-slate-50" data-testid={`hrd-slip-row-${s.id}`}>
+                    <td className="px-4 py-2.5"><Checkbox checked={!!sel[s.id]} onCheckedChange={(v) => setSel((p) => ({ ...p, [s.id]: v }))} data-testid={`hrd-slip-check-${s.id}`} /></td>
                     <td className="px-4 py-2.5 font-medium text-slate-800">{s.nama}</td>
                     <td className="px-4 py-2.5 text-slate-600">{s.jabatan || "-"}</td>
                     <td className="px-4 py-2.5 text-right text-slate-600">{formatRupiah(s.gross)}</td>
@@ -798,6 +815,15 @@ function PayslipsSection({ hapi, can }) {
             <AlertDialogDescription>Slip gaji ini akan dihapus permanen dari periode ini.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Batal</AlertDialogCancel>
             <AlertDialogAction className="bg-rose-600 hover:bg-rose-700" onClick={doDelete} data-testid="hrd-slip-del-confirm">Hapus</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={bulkOpen} onOpenChange={(o) => !o && setBulkOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Hapus {selectedIds.length} slip terpilih?</AlertDialogTitle>
+            <AlertDialogDescription>Semua slip gaji yang dicentang akan dihapus permanen dari periode ini.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction className="bg-rose-600 hover:bg-rose-700" onClick={doBulkDelete} data-testid="hrd-slip-bulk-del-confirm">Hapus Semua</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 

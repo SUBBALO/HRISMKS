@@ -2,6 +2,7 @@
 Portal dikunci PIN — bahkan admin harus masukkan PIN untuk melihat data gaji."""
 import os
 import io
+import re
 import uuid
 import hashlib
 import hmac
@@ -699,6 +700,26 @@ async def delete_payslip(sid: str, current: dict = Depends(require_hrd_perm("hrd
     return {"success": True}
 
 
+class BulkIdsIn(BaseModel):
+    ids: list[str] = []
+
+
+@router.post("/payslips/bulk-delete")
+async def bulk_delete_payslips(payload: BulkIdsIn, current: dict = Depends(require_hrd_perm("hrd_slip_gaji", "delete"))):
+    """Hapus banyak slip sekaligus (centang). Hanya slip dalam grup payroll user."""
+    deleted = 0
+    for sid in payload.ids[:500]:
+        existing = await db.hrd_payslips.find_one({"id": sid, **NOT_DELETED_FILTER}, {"_id": 0})
+        if not existing:
+            continue
+        # Lewati slip di luar grup payroll user — jangan gagalkan seluruh batch.
+        if _slip_group(existing) not in _allowed_groups(current):
+            continue
+        if await soft_delete_one("hrd_payslips", {"id": sid}, current):
+            deleted += 1
+    return {"success": True, "deleted": deleted}
+
+
 DEDUCT_KEYWORDS = ["potong", "bpjs", "pph", "iuran", "pinjam", "kasbon", "deduct", "denda",
                    "koperasi", "absent", "absen", "jht", "jp", "jkk", "jkm", "jpk"]
 KNOWN = {"nik": "nik", "kode": "nik", "kode_karyawan": "nik", "nama": "nama", "name": "nama",
@@ -755,6 +776,79 @@ def _norm_date(v):
     return ""
 
 
+_EMAIL_RX = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+
+def _clean_txt(v):
+    """Bersihkan spasi khusus (nbsp / zero-width) & rapikan spasi ganda."""
+    if v is None:
+        return ""
+    s = str(v).replace("\xa0", " ").replace("\u200b", "").replace("\u200c", "").replace("\ufeff", "")
+    return " ".join(s.split()).strip()
+
+
+def _nk(v):
+    """Kunci normalisasi nama/NIK untuk pencocokan (huruf kecil, spasi rapi)."""
+    return _clean_txt(v).lower()
+
+
+def _extract_email(v):
+    """Ambil satu alamat email dari sel apa pun: teks bebas, 'mailto:', spasi khusus, huruf besar."""
+    if v is None:
+        return ""
+    s = str(v).replace("\xa0", " ").replace("\u200b", "").replace("\u200c", "").replace("\ufeff", "").strip()
+    if s.lower().startswith("mailto:"):
+        s = s[7:]
+    m = _EMAIL_RX.search(s)
+    return m.group(0).strip() if m else ""
+
+
+def _cell_email(ws, r, c):
+    """Email dari nilai sel; fallback ke target hyperlink (mailto) bila nilai kosong."""
+    if not c:
+        return ""
+    cell = ws.cell(r, c)
+    em = _extract_email(cell.value)
+    if not em:
+        try:
+            hl = cell.hyperlink
+            if hl and getattr(hl, "target", None):
+                em = _extract_email(hl.target)
+        except Exception:
+            pass
+    return em
+
+
+def _slip_email(ws, max_row):
+    """Cari email pada sheet slip. Utamakan yang berdekatan dengan label 'email';
+    bila tak ada, pakai email pertama yang ditemukan sebagai cadangan. Nilai ini
+    HANYA dipakai bila master/direktori tak punya email (lihat import_excel),
+    supaya email kontak perusahaan / footer tidak menimpa email karyawan."""
+    limit = min(int(max_row or 0), 40)
+    labeled, bare = "", ""
+    for r in range(6, limit + 1):
+        for c in range(1, 15):
+            v = ws.cell(r, c).value
+            if isinstance(v, str):
+                low = v.lower()
+                if "email" in low or "e-mail" in low or low.strip() == "mail":
+                    em = _extract_email(v)
+                    if not em:
+                        for cc in range(c + 1, min(c + 6, 20)):
+                            em = _cell_email(ws, r, cc)
+                            if em:
+                                break
+                    if em and not labeled:
+                        labeled = em
+            if not bare:
+                b = _cell_email(ws, r, c)
+                if b:
+                    bare = b
+        if labeled:
+            break
+    return labeled or bare
+
+
 def _parse_directory(wb):
     """Baca sheet direktori (mis. 'Daftar Gaji') yang punya header NAMA & EMAIL.
     Kembalikan peta email + tanggal lahir per NAMA dan per NIK."""
@@ -769,12 +863,18 @@ def _parse_directory(wb):
                 v = ws.cell(r, c).value
                 if isinstance(v, str) and v.strip():
                     labels[v.strip().lower()] = c
-            if "nama" in labels and "email" in labels:
+            nama_col, email_col = None, None
+            for _k, _c in labels.items():
+                if nama_col is None and (_k == "nama" or _k == "name" or _k.startswith("nama")):
+                    nama_col = _c
+                if email_col is None and ("email" in _k or "e-mail" in _k or _k == "mail"):
+                    email_col = _c
+            if nama_col and email_col:
                 header_row = r
                 cols = {
-                    "nama": labels.get("nama"),
-                    "email": labels.get("email"),
-                    "nik": labels.get("nik"),
+                    "nama": nama_col,
+                    "email": email_col,
+                    "nik": next((labels[k] for k in labels if k in ("nik", "kode", "kode karyawan", "kode_karyawan", "id")), None),
                     "lahir": next((labels[k] for k in labels if "lahir" in k), None),
                     "take_home": next((labels[k] for k in labels if "take home" in k), None),
                 }
@@ -785,19 +885,19 @@ def _parse_directory(wb):
             nama = ws.cell(r, cols["nama"]).value if cols["nama"] else None
             if not nama or not str(nama).strip():
                 continue
-            email = ws.cell(r, cols["email"]).value if cols["email"] else None
+            email = _cell_email(ws, r, cols["email"]) if cols.get("email") else ""
             tgl = ws.cell(r, cols["lahir"]).value if cols.get("lahir") else None
             nik = ws.cell(r, cols["nik"]).value if cols.get("nik") else None
             th = ws.cell(r, cols["take_home"]).value if cols.get("take_home") else None
             rec = {
-                "email": str(email).strip() if email else "",
+                "email": email or "",
                 "tanggal_lahir": _norm_date(tgl),
-                "nik": str(nik).strip() if nik else "",
+                "nik": _clean_txt(nik),
                 "take_home": _numify(th),
             }
-            by_nama[str(nama).strip().lower()] = rec
+            by_nama[_nk(nama)] = rec
             if rec["nik"]:
-                by_nik[rec["nik"].lower()] = rec
+                by_nik[_nk(rec["nik"])] = rec
     return by_nama, by_nik
 
 
@@ -809,14 +909,44 @@ def _parse_slip_sheet(ws, month, year):
     if not nama or str(nama).strip() == "":
         return None
     nik = _cell(ws, "E8")
+    # Blok rate/tunjangan header (kolom G = label, kolom J = nilai). Dibaca DINAMIS
+    # sampai baris "PENGHASILAN" agar SETIAP baris yang ada ikut terbaca
+    # (Perhari, Lembur/Jam, T. Kehadiran, T. Transport, dll). Sebagian sheet punya
+    # baris tertentu, sebagian tidak — jangan ada yang terlewat.
+    rate_end = 12
+    for _r in range(8, 20):
+        _a = _cell(ws, f"A{_r}")
+        if _a and str(_a).strip().upper().startswith("PENGHASILAN"):
+            rate_end = _r
+            break
+    rates = []
+    for _r in range(8, rate_end):
+        _lbl = _cell(ws, f"G{_r}")
+        _lbl_s = str(_lbl).strip() if _lbl else ""
+        if not _lbl_s or _lbl_s.upper() in ("PENGHASILAN", "PENGURANGAN"):
+            continue
+        _val = _numify(_cell(ws, f"J{_r}"))
+        if _val is None:
+            continue
+        rates.append({"label": _lbl_s, "amount": _val})
+
+    def _rate_val(*subs):
+        for _rr in rates:
+            _ll = _rr["label"].lower()
+            if any(s in _ll for s in subs):
+                return _rr["amount"]
+        return None
+
     slip = {
-        "nama": str(nama).strip(),
-        "nik": str(nik).strip() if nik else "",
+        "nama": _clean_txt(nama),
+        "nik": _clean_txt(nik),
         "dept": str(_cell(ws, "C9") or "").strip(),
         "jabatan": str(_cell(ws, "C10") or "").strip(),
-        "perhari": _numify(_cell(ws, "J8")),
-        "lembur_jam": _numify(_cell(ws, "J9")),
-        "tkehadiran_rate": _numify(_cell(ws, "J10")),
+        "rates": rates,
+        "perhari": _rate_val("perhari"),
+        "lembur_jam": _rate_val("lembur"),
+        "tkehadiran_rate": _rate_val("kehadiran"),
+        "t_transport": _rate_val("transport"),
         "earnings": [],
         "deductions": [],
     }
@@ -880,20 +1010,9 @@ def _parse_slip_sheet(ws, month, year):
     slip["net"] = net if net is not None else round(slip["gross"] - slip["total_deduction"], 2)
     slip["take_home"] = take_home if take_home is not None else _round_rp(slip["net"])
     slip["terbilang"] = str(terbilang).strip() if terbilang else ""
-    # Deteksi email opsional: cari sel berisi alamat email di mana pun pada sheet slip
-    email_sheet = ""
-    for r in range(6, max_row + 1):
-        for c in range(1, 12):
-            v = ws.cell(r, c).value
-            if isinstance(v, str) and "@" in v:
-                cand = v.strip()
-                local, _, dom = cand.partition("@")
-                if local and "." in dom and " " not in cand:
-                    email_sheet = cand
-                    break
-        if email_sheet:
-            break
-    slip["email_sheet"] = email_sheet
+    # Deteksi email milik KARYAWAN pada sheet slip: hanya bila berdekatan dengan
+    # label 'email' agar tidak salah ambil email kontak perusahaan / footer / approver.
+    slip["email_sheet"] = _slip_email(ws, max_row)
     # Deteksi tanggal lahir: cari label mengandung 'lahir' lalu ambil nilai tanggal di kanannya
     tgl_lahir = ""
     for r in range(6, max_row + 1):
@@ -936,8 +1055,8 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
 
     # Preload master karyawan untuk auto-match email/bank/rekening
     emps = await db.hrd_employees.find(NOT_DELETED_FILTER, {"_id": 0}).to_list(2000)
-    by_nik = {(e.get("nik") or "").strip().lower(): e for e in emps if e.get("nik")}
-    by_nama = {(e.get("nama") or "").strip().lower(): e for e in emps if e.get("nama")}
+    by_nik = {_nk(e.get("nik")): e for e in emps if e.get("nik")}
+    by_nama = {_nk(e.get("nama")): e for e in emps if e.get("nama")}
     # Baca tabel direktori (sheet 'Daftar Gaji') untuk email + tanggal lahir
     dir_by_nama, dir_by_nik = _parse_directory(wb)
 
@@ -949,9 +1068,9 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
         if not slip:
             continue
         # Auto-match ke Master Karyawan (email/bank/rekening)
-        match = by_nik.get((slip.get("nik") or "").strip().lower()) if slip.get("nik") else None
+        match = by_nik.get(_nk(slip.get("nik"))) if slip.get("nik") else None
         if not match:
-            match = by_nama.get(slip["nama"].strip().lower())
+            match = by_nama.get(_nk(slip["nama"]))
         sheet_email = (slip.pop("email_sheet", "") or "").strip()
         tgl_sheet = (slip.get("tanggal_lahir") or "").strip()  # dari sheet slip (jika ada)
         slip["email"] = ""
@@ -965,7 +1084,7 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
             if not slip.get("jabatan") and match.get("jabatan"):
                 slip["jabatan"] = match["jabatan"]
         # Tabel direktori 'Daftar Gaji' (cocokkan by NIK lalu by NAMA)
-        drec = dir_by_nik.get((slip.get("nik") or "").strip().lower()) or dir_by_nama.get(slip["nama"].strip().lower())
+        drec = dir_by_nik.get(_nk(slip.get("nik"))) or dir_by_nama.get(_nk(slip["nama"]))
         if drec and drec.get("email"):
             slip["email"] = drec["email"]
         # Tanggal lahir: prioritas sheet slip > tabel direktori
@@ -973,8 +1092,9 @@ async def import_excel(month: int = Form(...), year: int = Form(...), file: Uplo
             slip["tanggal_lahir"] = tgl_sheet
         elif drec and drec.get("tanggal_lahir"):
             slip["tanggal_lahir"] = drec["tanggal_lahir"]
-        # Email dari sheet slip paling spesifik (override)
-        if sheet_email:
+        # Email dari sheet slip hanya CADANGAN bila master & direktori kosong —
+        # cegah email kontak perusahaan / footer di slip menimpa email karyawan.
+        if sheet_email and not slip.get("email"):
             slip["email"] = sheet_email
         # Audit: bandingkan Take Home slip vs tabel 'Daftar Gaji' (kolom Take Home Pay)
         dg_th = drec.get("take_home") if drec else None
@@ -1178,12 +1298,29 @@ def _render_slip_pdf(slip: dict, printed_by: str = "") -> io.BytesIO:
 
     # Info karyawan (kiri) + rate (kanan)
     nik = slip.get("nik", "")
-    info = Table([
-        ["Nama", ":", slip.get("nama", ""), "Perhari", ":", _money(slip.get("perhari"))],
-        ["NIK", ":", nik, "Lembur/Jam", ":", _money(slip.get("lembur_jam"))],
-        ["Dept", ":", slip.get("dept", "") or "Production", "T. Kehadiran", ":", _money(slip.get("tkehadiran_rate"))],
-        ["Jabatan", ":", slip.get("jabatan", ""), "", "", ""],
-    ], colWidths=[20 * mm, 4 * mm, 66 * mm, 28 * mm, 4 * mm, 56 * mm])
+    # Kolom kiri: identitas. Kolom kanan: rate/tunjangan DINAMIS dari slip['rates']
+    # (menampilkan semua baris yang ada — Perhari, Lembur/Jam, T. Kehadiran, T. Transport, dll).
+    left_rows = [
+        ["Nama", ":", slip.get("nama", "")],
+        ["NIK", ":", nik],
+        ["Dept", ":", slip.get("dept", "") or "Production"],
+        ["Jabatan", ":", slip.get("jabatan", "")],
+    ]
+    rate_rows = list(slip.get("rates") or [])
+    if not rate_rows:
+        # Kompat slip lama (belum punya 'rates'): pakai field lawas bila tersedia.
+        for _lab, _key in (("Perhari", "perhari"), ("Lembur/Jam", "lembur_jam"),
+                           ("T. Kehadiran", "tkehadiran_rate"), ("T. Transport", "t_transport")):
+            if slip.get(_key) is not None:
+                rate_rows.append({"label": _lab, "amount": slip.get(_key)})
+    right_rows = [[r.get("label", ""), ":", _money(r.get("amount"))] for r in rate_rows]
+    _nrows = max(len(left_rows), len(right_rows), 1)
+    info_data = []
+    for _i in range(_nrows):
+        _l = left_rows[_i] if _i < len(left_rows) else ["", "", ""]
+        _rr = right_rows[_i] if _i < len(right_rows) else ["", "", ""]
+        info_data.append(_l + _rr)
+    info = Table(info_data, colWidths=[20 * mm, 4 * mm, 66 * mm, 28 * mm, 4 * mm, 56 * mm])
     info.setStyle(TableStyle([
         ("FONTSIZE", (0, 0), (-1, -1), 9), ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("FONTNAME", (2, 0), (2, 0), "Helvetica-Bold"),

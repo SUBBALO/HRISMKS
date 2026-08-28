@@ -9,7 +9,13 @@ import os
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://hris-sarana.preview.emergentagent.com").rstrip("/")
+from dotenv import dotenv_values
+
+_env = dotenv_values("/app/frontend/.env")
+_base = os.environ.get("REACT_APP_BACKEND_URL") or _env.get("REACT_APP_BACKEND_URL")
+if not _base:
+    raise RuntimeError("REACT_APP_BACKEND_URL missing")
+BASE_URL = _base.rstrip("/")
 API = f"{BASE_URL}/api"
 
 NOFIA_PIN = "4321"

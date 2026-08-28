@@ -1,0 +1,55 @@
+{
+  "summary": "Backend-only testing of the Excel-import email auto-detection fix (HRD payroll). Created /app/backend/tests/test_payroll_email_import.py with 13 tests covering all 6 requested email variations + 2 extra slip-sheet variants and the tolerant directory header, plus regression of gaji_trial.xlsx import, PDF 'T. Transport' and bulk-delete: 13/13 PASSED. Real-file check via GET /api/hrd/payslips?month=8&year=2026 shows all 5 slips have non-empty emails. One genuine edge-case defect found: any email text anywhere in a slip sheet (rows 6+, cols 1-14) overrides the correct per-employee directory email (reproduced: company footer 'Info: hrd@mitrakaryasarana.co.id' replaced the employee's real email).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/hrd/payslips/import-excel",
+        "issue": "Sheet-wide email scan in _parse_slip_sheet (rows 6..max_row, cols 1..14) takes the FIRST email found anywhere in the slip sheet and overrides the per-employee directory email (import_excel line ~1075 'if sheet_email'). Reproduced with test_payroll_email_footer_edge.py: directory email ivan.real@mks.co.id was replaced by a footer/company contact 'Info: hrd@mitrakaryasarana.co.id'. In real printed slips (company contact, 'Approved by: manager@...', HR contact) this silently assigns the SAME wrong email to every employee, so blast would send payslips to the wrong recipient (data-leak risk). Suggested fix: restrict scan to the employee info block (e.g. rows 6-12) and/or require a nearby 'email' label, and ignore a sheet email that is identical across multiple slip sheets / drop it when it does not match the employee's directory email.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "N/A (pre-existing test data)",
+        "issue": "tests/test_payroll_isolation.py: 1 failure + 4 errors because user 'nofia' does not exist (login 401). Per /app/memory/test_credentials.md nofia is only configured if already present, so this is stale test data, not a regression of this iteration."
+      },
+      {
+        "endpoint": "POST /api/hrd/payslips/import-excel",
+        "issue": "Stored slip 'nama' keeps raw spacing (double spaces) — matching uses _nk() so import works, but the displayed/persisted name is not normalized via _clean_txt(). Cosmetic."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_payroll_email_import.py",
+    "/app/backend/tests/test_payroll_email_footer_edge.py",
+    "/app/test_reports/pytest/pytest_email_import.xml",
+    "/app/test_reports/pytest/pytest_payroll_regression.xml"
+  ],
+  "action_items": [
+    "Fix sheet-wide email over-detection: do not let a company/footer email in a slip sheet override the employee's directory email (see backend_issues.critical). Re-run /app/backend/tests/test_payroll_email_footer_edge.py — it must pass.",
+    "Optional: normalize persisted slip 'nama' with _clean_txt() so double spaces are collapsed.",
+    "Optional: update or skip tests/test_payroll_isolation.py nofia cases (user not seeded)."
+  ],
+  "critical_code_review_comments": [
+    "hrd.py _parse_slip_sheet email scan is too broad (rows 6..40 x cols 1..14) and its result unconditionally overrides the directory email — needs a locality/label constraint.",
+    "/app/backend/routers/hrd.py is 1582 lines; parsing helpers (_extract_email/_cell_email/_parse_directory/_parse_slip_sheet) and PDF generation should be split into separate modules.",
+    "_extract_email/_clean_txt/_nk implementations are correct and reused consistently in _parse_directory and import_excel matching — good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_payroll_email_import.py",
+    "/app/backend/tests/test_payroll_email_footer_edge.py",
+    "/app/backend/tmp_uploads/list_check.py"
+  ],
+  "success_rate": {"backend": "93% (13/13 email+regression tests pass; 1 edge-case defect found in a 14th diagnostic test)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Generated xlsx fixtures saved to /app/backend/tmp_uploads/ (TEST_email_variants_EMail.xlsx, TEST_email_variants_mail.xlsx, TEST_footer_email.xlsx). All TEST_* payslips created in periods 9/2026 and 11/2026 were cleaned up via bulk-delete (verified empty).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "herliana / 123456 (PIN Gaji 1234 -> x-hrd-gaji token)",
+  "context_for_next_testing_agent": "Run payroll tests SERIALLY (-n 0): pytest.ini uses xdist loadscope and these classes share the same period/state. New suite: tests/test_payroll_email_import.py (email variants: plain, uppercase+spaces, 'Email: x@y', trailing nbsp, mailto hyperlink in directory, double-space name mismatch, slip-sheet text email, slip-sheet mailto hyperlink; directory headers 'E-Mail' and 'mail'; gaji_trial.xlsx regression 3 slips; PDF T. Transport; bulk-delete). tests/test_payroll_email_footer_edge.py currently FAILS by design and documents the open defect. 'nofia' user does not exist -> test_payroll_isolation.py nofia cases fail (pre-existing).",
+  "rca_of_the_issue": "The reported bug (12 of ~100 emails not read) is fixed: _extract_email (regex + mailto + nbsp/zero-width cleanup), _cell_email (hyperlink fallback), _nk name normalization and the tolerant directory header (email/e-mail/mail) all verified end-to-end through the real API. Remaining risk is the opposite failure mode: _parse_slip_sheet scans the whole slip sheet for any email and import_excel gives it the highest priority, so a single non-employee email printed on the slip (company/HR contact, approver) silently overrides the correct per-employee email for every sheet."
+}

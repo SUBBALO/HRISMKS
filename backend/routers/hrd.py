@@ -856,6 +856,9 @@ def _parse_directory(wb):
     by_nama, by_nik = {}, {}
     for name in wb.sheetnames:
         ws = wb[name]
+        # Sheet slip per karyawan bukan direktori — lewati.
+        if str(_cell(ws, "A5") or "").strip().upper() == "SLIP GAJI":
+            continue
         header_row, cols = None, {}
         for r in range(1, 13):
             labels = {}
@@ -883,7 +886,11 @@ def _parse_directory(wb):
             continue
         for r in range(header_row + 1, min(ws.max_row, 1000) + 1):
             nama = ws.cell(r, cols["nama"]).value if cols["nama"] else None
-            if not nama or not str(nama).strip():
+            nm = _clean_txt(nama)
+            if not nm or nm.lower() in ("nama", "name"):
+                continue
+            # Lewati baris yang "nama"-nya berupa angka (mis. tabel TER/PTKP), bukan nama orang.
+            if isinstance(nama, (int, float)) or nm.replace(".", "").replace(",", "").replace(" ", "").isdigit():
                 continue
             email = _cell_email(ws, r, cols["email"]) if cols.get("email") else ""
             tgl = ws.cell(r, cols["lahir"]).value if cols.get("lahir") else None

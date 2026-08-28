@@ -21,6 +21,23 @@ LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 
 router = APIRouter(prefix="/hrd", tags=["hrd-ai"])
 
+
+def _llm_imports():
+    """Impor 'emergentintegrations' secara lazy. Bila paket AI opsional belum
+    terpasang di server (mis. deployment self-host tanpa index privat Emergent),
+    kembalikan HTTP 503 yang jelas alih-alih membuat server crash. Fitur HRIS
+    inti tetap berjalan normal. Pasang lewat requirements-emergent.txt."""
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+        return LlmChat, UserMessage, FileContentWithMimeType
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail=("Fitur AI tidak tersedia: paket 'emergentintegrations' belum terpasang di server ini. "
+                    "Pasang via requirements-emergent.txt (butuh EMERGENT_LLM_KEY) untuk mengaktifkan "
+                    "Screening CV & Draft Surat AI."),
+        )
+
 CV_DIR = Path(__file__).resolve().parent.parent / "uploads" / "cv"
 CV_EXT = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
           ".png": "image/png", ".webp": "image/webp"}
@@ -50,7 +67,7 @@ async def upload_cv(file: UploadFile = File(...), job_desc: str = Form(""),
     path = CV_DIR / f"{cid}{ext}"
     path.write_bytes(data)
 
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+    LlmChat, UserMessage, FileContentWithMimeType = _llm_imports()
     chat = LlmChat(api_key=LLM_KEY, session_id=f"cv-{cid}",
                    system_message="Kamu asisten HRD yang mengekstrak data CV pelamar. Jawab HANYA dengan JSON valid, tanpa penjelasan lain.").with_model("gemini", "gemini-2.5-flash")
     skor_part = ""
@@ -180,7 +197,7 @@ async def draft_letter(payload: DraftIn, current: dict = Depends(require_hrd_per
                         f"Jabatan {emp.get('jabatan') or '-'}, Departemen {emp.get('dept') or '-'}.")
     sp_info = f" Tingkat: {payload.tingkat_sp}." if payload.jenis == "sp" and payload.tingkat_sp else ""
 
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    LlmChat, UserMessage, _ = _llm_imports()
     from datetime import datetime, timezone, timedelta
     tgl = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7)))
     BULAN = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
@@ -222,7 +239,7 @@ async def ocr_ktp(file: UploadFile = File(...), current: dict = Depends(require_
     tmp = CV_DIR / f"ktp-{uuid.uuid4().hex[:8]}{ext}"
     CV_DIR.mkdir(parents=True, exist_ok=True)
     tmp.write_bytes(data)
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+    LlmChat, UserMessage, FileContentWithMimeType = _llm_imports()
     chat = LlmChat(api_key=LLM_KEY, session_id=f"ktp-{uuid.uuid4().hex[:8]}",
                    system_message="Kamu asisten HRD yang membaca KTP Indonesia. Jawab HANYA dengan JSON valid.").with_model("gemini", "gemini-2.5-flash")
     prompt = ('Baca KTP terlampir, keluarkan JSON: "nik_ktp" (16 digit), "nama", "tempat_lahir", '
@@ -291,7 +308,7 @@ async def ai_read_bytes(data: bytes, ext: str, kategori: str) -> dict:
     CV_DIR.mkdir(parents=True, exist_ok=True)
     tmp = CV_DIR / f"rd-{uuid.uuid4().hex[:8]}{ext}"
     tmp.write_bytes(data)
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+    LlmChat, UserMessage, FileContentWithMimeType = _llm_imports()
     chat = LlmChat(api_key=LLM_KEY, session_id=f"rd-{uuid.uuid4().hex[:8]}",
                    system_message="Kamu asisten HRD yang membaca dokumen. Jawab HANYA dengan JSON valid.").with_model("gemini", "gemini-2.5-flash")
     try:

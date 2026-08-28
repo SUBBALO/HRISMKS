@@ -1,0 +1,31 @@
+{
+  "summary": "Backend-only validation of the dependency-hygiene change (removal of emergentintegrations/litellm from requirements.txt, new optional requirements-emergent.txt, _llm_imports() graceful degradation in hrd_ai.py). Created /app/backend/tests/test_deps_hygiene_and_ai_degrade.py (15 tests: 14 passed, 1 skipped - openapi.json is not exposed via the public ingress, the SPA answers it, so route registration was verified via a live unauthenticated call instead). Verified: GET /api/health = 200; hrd_ai imports and returns HTTP 503 with a clear Indonesian message when emergentintegrations is blocked (subprocess simulation of the user's Windows server); all 4 AI call sites use _llm_imports(); the only 'from emergentintegrations' import is inside the helper (lazy). AI still FUNCTIONS in preview: POST /api/hrd/candidates/upload-cv with a generated PDF CV returned 200 with real LLM-parsed fields (id/status Baru/skill array, no _id leak) - not 503. Core payroll regression for month=11/year=2026 passed end-to-end: login herliana/123456 -> verify-pin 1234 -> gaji_token -> import gaji_trial.xlsx created exactly 3 slips (Wawan Munandar, Harjono, Rahmat Ari Sandi NST) each with non-empty email, correct period, no _id; Rahmat PDF renders 'T. Transport' twice with rate 10.000; bulk-delete removed all 3 and list confirmed removal (cleanup done). Prior suites re-run as regression: 35/35 passed (test_payroll_email_import, test_payroll_email_footer_edge, test_payroll_rates_and_bulk_delete, test_build_tooling_regression).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "requirements.txt (pymongo==4.6.3)", "issue": "REMAINING Python 3.13 / Windows install risk: a pip resolve for platform win_amd64 + python 3.13 with --only-binary fails ONLY on pymongo==4.6.3 (no cp313 wheels; wheels exist from 4.9+). Every other pin resolves cleanly for win_amd64/py3.13. On the user's server pip will fall back to the pymongo sdist and needs MSVC build tools (may fail again). motor==3.3.1 pins pymongo<4.7, so bumping requires motor>=3.6 + pymongo>=4.9 (or documenting Python 3.12)."},
+      {"endpoint": "GET /openapi.json", "issue": "OpenAPI schema is not reachable through the public ingress (the React SPA index.html is returned for both /openapi.json and /api/openapi.json), so API docs cannot be inspected externally. Informational only."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_deps_hygiene_and_ai_degrade.py",
+    "/app/test_reports/pytest/pytest_results_iter5.xml"
+  ],
+  "action_items": [
+    "OPTIONAL/HIGH-VALUE for the user's deployment: bump motor (>=3.6) + pymongo (>=4.9) so requirements.txt installs from wheels on Python 3.13/Windows, or add a note in the deploy docs that Python 3.12 is required. This is the only remaining pip blocker found."
+  ],
+  "critical_code_review_comments": [
+    "hrd_ai.py: _llm_imports() correctly re-raises HTTPException(503) on ImportError and is used at all 4 call sites; module-level import graph stays clean so server boot is unaffected. No changes needed.",
+    "requirements-emergent.txt documents the --extra-index-url install path; consider referencing it from README so operators know how to enable AI features.",
+    "requirements.txt still ships dev/tooling packages (black, mypy, flake8, isort, pytest*) and unused platform SDKs (stripe, boto3, s5cmd, google-generativeai) to production; splitting into requirements-dev.txt would shrink the user's install surface (all resolve on win/py3.13, so not a blocker)."
+  ],
+  "updated_files": ["/app/backend/tests/test_deps_hygiene_and_ai_degrade.py"],
+  "success_rate": {"backend": "100% (14 passed, 1 skipped of 15 new; 35/35 prior regression tests)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Temporary: 3 payslips for period 11/2026 imported from gaji_trial.xlsx (deleted via bulk-delete) and 1 TEST_cv.pdf candidate (deleted after assertion).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "herliana / 123456 (PIN Gaji 1234) from /app/memory/test_credentials.md",
+  "context_for_next_testing_agent": "Iteration 5 covered dependency hygiene + AI graceful degradation + payroll regression (period 11/2026, cleaned up). Reusable helpers in /app/backend/tests/test_deps_hygiene_and_ai_degrade.py: gaji_client fixture (login + verify-pin -> x-hrd-gaji header), _import_sample, _pdf_text, _make_cv_pdf (reportlab-generated CV for AI tests). Note /openapi.json is shadowed by the SPA - don't rely on it; probe routes with an unauthenticated request expecting 401/403 instead of 404. pytest.ini enforces -n 2 --dist loadscope; keep payroll assertions inside one class to avoid cross-worker races. Only open item: pymongo==4.6.3 lacks cp313 wheels (Windows/Py3.13).",
+  "rca_of_the_issue": "Original failure: requirements.txt listed emergentintegrations==0.2.0 and a litellm wheel URL from the private Emergent CDN, neither on PyPI, so pip aborted on the user's Windows/Py3.13 server. Fix verified: both lines removed, optional deps moved to requirements-emergent.txt, and hrd_ai._llm_imports() converts the ImportError into a clear HTTP 503 so the server boots and all core HRIS features work without the AI package (confirmed by simulating the missing module in a subprocess). Residual risk found during verification: pymongo==4.6.3 has no cp313 wheel, which can reproduce a similar pip failure on Python 3.13."
+}

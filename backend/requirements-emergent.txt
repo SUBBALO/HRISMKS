@@ -1,0 +1,18 @@
+# =========================================================================
+# Dependency OPSIONAL untuk fitur AI HRD (Screening CV, KTP OCR, Draft Surat AI).
+# =========================================================================
+# Paket ini berasal dari index privat Emergent (TIDAK tersedia di PyPI), sehingga
+# SENGAJA tidak dimasukkan ke requirements.txt utama agar:
+#   python -m pip install -r requirements.txt
+# tetap berhasil di server production mana pun (Python 3.13, Windows, dll).
+#
+# Cara mengaktifkan fitur AI (butuh EMERGENT_LLM_KEY diisi di backend/.env):
+#   python -m pip install -r requirements-emergent.txt \
+#       --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
+#
+# Catatan:
+# - 'litellm' otomatis ikut terpasang sebagai dependency emergentintegrations.
+# - Jika paket ini TIDAK dipasang, seluruh fitur HRIS inti tetap berjalan normal;
+#   hanya endpoint AI yang mengembalikan HTTP 503 dengan pesan yang jelas.
+
+emergentintegrations
